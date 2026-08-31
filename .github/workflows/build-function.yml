@@ -1,0 +1,40 @@
+name: Build function.zip
+
+# 一键打包 Scaleway 可部署的 function.zip：
+#   - 在 GitHub 仓库页面：Actions → Build function.zip → Run workflow
+#   - 或者打个 v 开头 tag（v1.0.0 等）自动触发
+# 产物会作为 GitHub Artifact 供你下载上传到 Scaleway。
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: function-zip
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build function.zip
+        run: sh scripts/build.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: function.zip
+          path: dist/function.zip
+          if-no-files-found: error

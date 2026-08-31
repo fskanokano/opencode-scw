@@ -1,0 +1,10 @@
+{
+  "name": "opencode-scw-function",
+  "private": true,
+  "version": "1.0.0",
+  "description": "OpenAI-compatible proxy backed by a real opencode agent (Scaleway Serverless Function)",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  }
+}

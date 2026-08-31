@@ -1,0 +1,14 @@
+{
+  "name": "opencode-scw",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Scaleway Serverless Function that wraps the real opencode agent behind an OpenAI-compatible API",
+  "main": "handler.js",
+  "scripts": {
+    "build": "sh scripts/build.sh",
+    "local": "node scripts/run-local.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

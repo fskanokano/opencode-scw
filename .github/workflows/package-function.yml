@@ -1,0 +1,50 @@
+name: Package Scaleway function.zip
+
+on:
+  workflow_dispatch:
+    inputs:
+      opencode_version:
+        description: "opencode version tag (e.g. v1.18.25) or 'latest'"
+        required: false
+        default: latest
+      target:
+        description: "Binary target (use linux-x64-baseline if the function crashes on startup)"
+        required: false
+        default: linux-x64
+        type: choice
+        options:
+          - linux-x64
+          - linux-x64-baseline
+          - linux-arm64
+      retention_days:
+        description: "Artifact retention in days"
+        required: false
+        default: "30"
+
+jobs:
+  package:
+    name: Build function.zip
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build function.zip
+        run: bash scripts/build-function.sh
+        env:
+          OPENCODE_VERSION: ${{ inputs.opencode_version }}
+          OPENCODE_TARGET: ${{ inputs.target }}
+
+      - name: Sanity check
+        run: |
+          unzip -l function.zip
+          file function/opencode
+          du -h function.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: function.zip
+          path: function.zip
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}
