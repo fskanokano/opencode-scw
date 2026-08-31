@@ -10,5 +10,14 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "@opencode-ai/sdk": "^1.18.25"
+  },
+  "devDependencies": {
+    "opencode-ai": "^1.18.25"
+  },
+  "allowScripts": {
+    "opencode-ai@1.18.25": true
   }
 }

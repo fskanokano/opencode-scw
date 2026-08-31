@@ -1,0 +1,83 @@
+name: Deploy to Scaleway
+
+# 推送到 main 即自动打包并部署到 Scaleway Serverless Functions。
+# 也可以手动触发：Actions → Deploy to Scaleway → Run workflow。
+#
+# 需要的 GitHub secrets（Settings → Secrets and variables → Actions）：
+#   SCW_ACCESS_KEY               Scaleway API Access Key
+#   SCW_SECRET_KEY               Scaleway API Secret Key
+#   SCW_DEFAULT_ORGANIZATION_ID  Scaleway 组织 ID
+#   SCW_DEFAULT_PROJECT_ID       Scaleway 项目 ID
+#   OPENCODE_API_KEY             opencode Zen API Key（写进函数环境变量）
+#   PROXY_API_KEY                代理访问密钥（写进函数环境变量）
+#
+# 可选仓库变量（vars，非 secret）：
+#   SCW_DEFAULT_REGION        区域（默认 fr-par）
+#   SCW_FUNCTION_NAMESPACE_ID 函数命名空间 UUID（推荐设置；不设则用名称查找）
+#   SCW_FUNCTION_NAMESPACE    命名空间名称（SCW_FUNCTION_NAMESPACE_ID 未设置时用）
+#   SCW_FUNCTION_NAME         函数名（默认 opencode-proxy）
+#   SCW_FUNCTION_RUNTIME      运行时（默认 node22）
+#   SCW_FUNCTION_MEMORY_LIMIT 内存 MB（默认 1024）
+#   SCW_FUNCTION_TIMEOUT      超时秒（默认 300）
+#   SCW_FUNCTION_PRIVACY      public|private（默认 public）
+#   SCW_FUNCTION_DEFAULT_MODEL 默认模型（可选）
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: scaleway-deploy
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-deploy:
+    name: Build + deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        # --omit=dev：opencode-ai（含各平台 ~170MB 二进制包）只在本地开发用，
+        # 部署包里的 opencode 可执行文件由 scripts/build.sh 直接从 GitHub Release 下载。
+        run: npm ci --omit=dev
+
+      - name: Package function.zip
+        run: bash scripts/build.sh
+
+      - name: Install & configure Scaleway CLI
+        uses: scaleway/action-scw@v0
+        with:
+          save-config: "true"
+          access-key: ${{ secrets.SCW_ACCESS_KEY }}
+          secret-key: ${{ secrets.SCW_SECRET_KEY }}
+          default-organization-id: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+          default-project-id: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+
+      - name: Deploy to Scaleway
+        run: bash scripts/scaleway-deploy.sh
+        env:
+          SCW_DEFAULT_REGION: ${{ vars.SCW_DEFAULT_REGION || 'fr-par' }}
+          SCW_FUNCTION_NAMESPACE_ID: ${{ vars.SCW_FUNCTION_NAMESPACE_ID }}
+          SCW_FUNCTION_NAMESPACE: ${{ vars.SCW_FUNCTION_NAMESPACE }}
+          SCW_FUNCTION_NAME: ${{ vars.SCW_FUNCTION_NAME || 'opencode-proxy' }}
+          SCW_FUNCTION_RUNTIME: ${{ vars.SCW_FUNCTION_RUNTIME || 'node22' }}
+          SCW_FUNCTION_HANDLER: ${{ vars.SCW_FUNCTION_HANDLER || 'handler.handle' }}
+          SCW_FUNCTION_MEMORY_LIMIT: ${{ vars.SCW_FUNCTION_MEMORY_LIMIT || '1024' }}
+          SCW_FUNCTION_TIMEOUT: ${{ vars.SCW_FUNCTION_TIMEOUT || '300' }}
+          SCW_FUNCTION_PRIVACY: ${{ vars.SCW_FUNCTION_PRIVACY || 'public' }}
+          SCW_FUNCTION_DEFAULT_MODEL: ${{ vars.SCW_FUNCTION_DEFAULT_MODEL }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          PROXY_API_KEY: ${{ secrets.PROXY_API_KEY }}

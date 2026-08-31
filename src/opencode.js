@@ -1,94 +1,79 @@
-// 调用"原汁原味"的 opencode。
+// 调用"原汁原味"的 opencode —— 通过官方 @opencode-ai/sdk。
 //
-// 每个请求我们 spawn 一次官方 opencode 可执行文件：
-//   opencode run "<用户消息>" --model zen/<id> --format json [--session <id>]
+// 之前的方式：每个请求 spawn 一次 opencode 可执行文件（重、慢、内存开销大）。
+// 现在的方式：把 opencode 当第三方库用 —— npm 安装 @opencode-ai/sdk，
+// 用 createOpencode() 启动一个共享的 opencode server 并拿到类型安全
+// client，之后所有请求复用同一个 server。opencode 仍然"原汁原味"：
+// 大模型对话、agent 工具循环、模型路由全部由 opencode 完成，本项目
+// 不实现任何大模型逻辑。
 //
-// opencode 是可执行体本身，它负责加载 Zen 配置、调用 Zen 大模型、执行
-// agent 工具循环。我们的适配层只做一件事：把 OpenAI /v1/chat/completions
-// 里的用户提问原封不动地传给 opencode，再把 opencode 返回的助手文本原封
-// 不动地翻译回 OpenAI 格式。绝不自己实现任何大模型调用。
+// SDK: https://opencode.ai/docs/sdk  (npm: @opencode-ai/sdk)
 
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
-const { spawn } = require("child_process");
+const DEFAULT_HOST = process.env.OPENCODE_SDK_HOST || "127.0.0.1";
+// 0 = 由 SDK 自动选择空闲端口；也可通过 OPENCODE_SDK_PORT 固定。
+const DEFAULT_PORT = Number(process.env.OPENCODE_SDK_PORT || 0) || 0;
 
-const RUNTIME_DIR = path.join(os.tmpdir(), "opencode-scw-runtime");
-
-function resolveBinary() {
-  const candidates = [
-    process.env.OPENCODE_BIN,
-    path.join(__dirname, "..", "bin", "opencode"),
-    process.env.OPENCODE_ARCH
-      ? path.join(__dirname, "..", "vendor", "opencode", process.env.OPENCODE_ARCH, "opencode")
-      : null,
-  ].filter(Boolean);
-  for (const c of candidates) {
-    try {
-      fs.accessSync(c, fs.constants.X_OK);
-      return c;
-    } catch (_e) {
-      /* keep looking */
-    }
-  }
-  return null;
-}
-
-function writeAuth(zk) {
-  // opencode 的凭据文件默认在 XDG_DATA_HOME/opencode/auth.json。
-  // 我们把 XDG_DATA_HOME 指到可写的临时目录，并额外写入 zen 凭据，
-  // 这样即使环境变量没被 opencode 自动读取，也能通过 auth.json 生效。
-  const authFile = path.join(RUNTIME_DIR, "data", "opencode", "auth.json");
-  fs.mkdirSync(path.dirname(authFile), { recursive: true });
-  const auth = {};
-  try {
-    Object.assign(auth, JSON.parse(fs.readFileSync(authFile, "utf8")));
-  } catch (_e) {
-    /* new file */
-  }
-  if (zk) auth.zen = { type: "api", key: zk };
-  fs.writeFileSync(authFile, JSON.stringify(auth, null, 2));
-  return authFile;
-}
-
-let runtime = null;
+let instance = null;
 let starting = null;
 
-// 幂等地准备运行环境（可写临时目录 + auth.json + 二进制），返回共享状态。
+async function createOpencode(options) {
+  const { createOpencode } = await import("@opencode-ai/sdk");
+  return createOpencode(options);
+}
+
+// 幂等地准备运行环境：写入 auth.json（Zen 凭据）并启动共享 opencode server。
 module.exports.ensureRuntime = function ensureRuntime() {
-  if (runtime) return Promise.resolve(runtime);
+  if (instance) return Promise.resolve(instance);
   if (starting) return starting;
 
   const zenKey = process.env.OPENCODE_API_KEY || process.env.OPENCODE_ZEN_API_KEY || "";
 
   starting = (async () => {
-    const bin = resolveBinary();
-    if (!bin) {
-      throw new Error(
-        "找不到 opencode 可执行文件。请先运行 `sh scripts/build.sh` 生成 function.zip，" +
-          "或设置 OPENCODE_BIN 指向 opencode 可执行文件。"
+    const fs = await import("fs");
+    const os = await import("os");
+    const path = await import("path");
+
+    // opencode 从 XDG_DATA_HOME/opencode/auth.json 读取凭据。
+    // 把 XDG_DATA_HOME 指到可写目录并写入 zen 凭据，双保险。
+    const dataHome =
+      process.env.OPENCODE_DATA_HOME || path.join(os.tmpdir(), "opencode-scw-data");
+    fs.mkdirSync(path.join(dataHome, "opencode"), { recursive: true });
+    if (zenKey) {
+      fs.writeFileSync(
+        path.join(dataHome, "opencode", "auth.json"),
+        JSON.stringify({ zen: { type: "api", key: zenKey } }, null, 2)
       );
     }
 
-    ["home", "data", "config", "cache", "project"].forEach((sub) =>
-      fs.mkdirSync(path.join(RUNTIME_DIR, sub), { recursive: true })
-    );
-    writeAuth(zenKey);
-
     const env = {
-      ...process.env,
-      HOME: path.join(RUNTIME_DIR, "home"),
-      XDG_DATA_HOME: path.join(RUNTIME_DIR, "data"),
-      XDG_CONFIG_HOME: path.join(RUNTIME_DIR, "config"),
-      XDG_CACHE_HOME: path.join(RUNTIME_DIR, "cache"),
-      OPENCODE_API_KEY: zenKey,
+      HOME: dataHome,
+      XDG_DATA_HOME: path.join(dataHome, "opencode"),
+      XDG_CONFIG_HOME: process.env.OPENCODE_CONFIG_HOME || path.join(dataHome, "config"),
+      XDG_CACHE_HOME: path.join(dataHome, "cache"),
       OPENCODE_DISABLE_AUTOUPDATE: "true",
-      OPENCODE_DISABLE_PRUNE: "true",
       NO_COLOR: "1",
     };
+    // SDK 用当前 process.env spawn server，先同步合并我们的环境变量。
+    Object.assign(process.env, env);
 
-    runtime = { bin, env, projectDir: path.join(RUNTIME_DIR, "project") };
-    return runtime;
+    // SDK 内部用 cross-spawn 直接执行 `opencode` 命令（走 PATH 查找）：
+    // 部署包里二进制放在 <项目根>/bin/opencode，本地开发时 npm 会把
+    // opencode-ai 的 bin 软链到 node_modules/.bin，两个目录都放进 PATH。
+    const binDir = path.join(__dirname, "..", "bin");
+    const npmBin = path.join(__dirname, "..", "node_modules", ".bin");
+    process.env.PATH = [binDir, npmBin, process.env.PATH].filter(Boolean).join(path.delimiter);
+
+    // createOpencode() 启动共享 server 并返回类型安全 client。
+    // 整个函数进程复用这一个实例 —— 不再每个请求 spawn 一次。
+    const oc = await createOpencode({
+      hostname: process.env.OPENCODE_SDK_HOST || DEFAULT_HOST,
+      port: DEFAULT_PORT,
+      timeout: Number(process.env.OPENCODE_SDK_STARTUP_TIMEOUT_MS || 60000),
+      config: {},
+    });
+
+    instance = oc;
+    return oc;
   })();
 
   starting.finally(() => {
@@ -97,108 +82,96 @@ module.exports.ensureRuntime = function ensureRuntime() {
   return starting;
 };
 
-// 从 opencode 的 JSON 事件行里抽取助手文本和 sessionID。
-//
-// `opencode run --format json` 每行输出一个事件对象，形如：
-//   {"type":"text","timestamp":...,"sessionID":"...","part":{"type":"text","text":"...","time":{"end":...}}}
-// 助手最终可见的答复在 type === "text" 的 part 里。sessionID 出现在任意一行中。
-function parseOutput(stdout) {
-  const lines = (stdout || "")
-    .split("\n")
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  let sessionID = null;
-  const textParts = [];
-  let fatalError = null;
-
-  for (const line of lines) {
-    let obj;
-    try {
-      obj = JSON.parse(line);
-    } catch (_e) {
-      continue; // 非 JSON 行（日志等）直接跳过
-    }
-    if (!obj || typeof obj !== "object") continue;
-    if (obj.sessionID && !sessionID) sessionID = obj.sessionID;
-    if (obj.type === "text" && obj.part && obj.part.type === "text" && obj.part.text) {
-      textParts.push(obj.part.text);
-    }
-    if (obj.type === "error" && obj.error) {
-      fatalError =
-        typeof obj.error === "string"
-          ? obj.error
-          : (obj.error && (obj.error.message || JSON.stringify(obj.error))) || "opencode 返回错误";
-    }
-  }
-
-  return {
-    sessionID,
-    text: textParts.join("\n\n").trim(),
-    fatalError,
-    lines,
-  };
-}
-
-function runProcess(bin, args, env, cwd, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, { env, cwd, stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (d) => (stdout += d.toString()));
-    child.stderr.on("data", (d) => (stderr += d.toString()));
-
-    const timer = setTimeout(() => {
-      try {
-        child.kill("SIGKILL");
-      } catch (_e) {
-        /* ignore */
-      }
-    }, timeoutMs);
-
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code, stdout, stderr });
-    });
-  });
-}
-
 /**
- * 用真实 opencode 执行一次 assistant 回复。
- * @returns {{ ok: boolean, text: string, sessionID: string|null, code: number, stderr: string,
- *             statusMessage: string }}
+ * 执行一次 assistant 回复（复用共享 opencode server）。
+ * @param {object} oc createOpencode() 返回的实例
+ * @param {{ prompt: string, model?: string, sessionID?: string|null }} opts
+ *   opts.model 形如 "zen/gpt-5.6-luna"
+ * @returns {{ ok: boolean, text: string, sessionID: string|null, code: number,
+ *             stderr: string, statusMessage: string }}
  */
-module.exports.runPrompt = async function runPrompt(runtime, opts) {
-  const args = ["run", opts.prompt, "--model", opts.model, "--format", "json"];
-  if (opts.sessionID) args.push("--session", opts.sessionID);
-  const timeoutMs = Number(process.env.OPENCODE_RUN_TIMEOUT_MS || 180000);
+module.exports.runPrompt = async function runPrompt(oc, opts) {
+  try {
+    // 会话：复用调用方传入的 sessionID，否则新建。
+    let sessionId = opts.sessionID || null;
+    if (!sessionId) {
+      const created = await oc.client.session.create({
+        body: { title: "OpenAI proxy session" },
+      });
+      sessionId = (created.data && created.data.id) || created.id;
+    }
 
-  const { code, stdout, stderr } = await runProcess(
-    runtime.bin,
-    args,
-    runtime.env,
-    runtime.projectDir,
-    timeoutMs
-  );
+    const result = await oc.client.session.prompt({
+      path: { id: sessionId },
+      body: {
+        ...(opts.model ? { model: parseModelId(opts.model) } : {}),
+        parts: [{ type: "text", text: opts.prompt }],
+      },
+    });
 
-  const parsed = parseOutput(stdout);
-
-  // opencode 可能把找不到模型 / 鉴权失败等写成非零退出码，也可能在 json 事件里带 error
-  const errEvent = parsed.fatalError;
-  if (!parsed.text && errEvent) {
-    return { ok: false, text: "", sessionID: parsed.sessionID, code, stderr: errEvent, statusMessage: errEvent };
+    const parts = (result.data && result.data.parts) || result.parts || [];
+    const text = extractTextParts(parts);
+    if (!text) {
+      return {
+        ok: false, text: "", sessionID: sessionId, code: 0, stderr: "",
+        statusMessage: "opencode 没有返回任何文本",
+      };
+    }
+    return { ok: true, text, sessionID: sessionId, code: 0, stderr: "", statusMessage: "ok" };
+  } catch (err) {
+    return {
+      ok: false,
+      text: "",
+      sessionID: opts.sessionID || null,
+      code: 1,
+      stderr: String((err && err.message) || err),
+      statusMessage: String((err && err.message) || err),
+    };
   }
-  if (!parsed.text && code !== 0) {
-    const detail = (stderr || "").trim();
-    return { ok: false, text: "", sessionID: parsed.sessionID, code, stderr: detail, statusMessage: detail || `opencode 退出码 ${code}` };
-  }
-  if (!parsed.text) {
-    return { ok: false, text: "", sessionID: parsed.sessionID, code, stderr: "", statusMessage: "opencode 没有返回任何文本" };
-  }
-
-  return { ok: true, text: parsed.text, sessionID: parsed.sessionID, code, stderr, statusMessage: "ok" };
 };
+
+/** 获取真实模型清单（opencode /config/providers），失败时返回 null 由调用方兜底。 */
+module.exports.fetchProviders = async function fetchProviders(oc) {
+  try {
+    const res = await oc.client.config.providers();
+    const data = res.data || res;
+    if (data && Array.isArray(data.providers)) {
+      const models = [];
+      for (const p of data.providers) {
+        for (const m of Object.values(p.models || {})) {
+          if (m && typeof m === "object" && m.id) {
+            models.push({ id: `${p.id}/${m.id}`, owned_by: p.id });
+          }
+        }
+      }
+      let defaultModel = null;
+      if (data.default && typeof data.default === "object") {
+        const k = Object.keys(data.default)[0];
+        if (k && data.default[k]) defaultModel = `${k}/${data.default[k]}`;
+      }
+      return { models, defaultModel };
+    }
+    return null;
+  } catch (_e) {
+    return null;
+  }
+};
+
+// "zen/gpt-5.6-luna" -> { providerID: "zen", modelID: "gpt-5.6-luna" }
+function parseModelId(model) {
+  const raw = String(model || "");
+  const idx = raw.indexOf("/");
+  if (idx > 0) {
+    return { providerID: raw.slice(0, idx), modelID: raw.slice(idx + 1) };
+  }
+  return { providerID: "zen", modelID: raw };
+}
+
+// 从 opencode message parts 里抽取助手文本（type === "text"）。
+function extractTextParts(parts) {
+  return (parts || [])
+    .filter((p) => p && p.type === "text" && typeof p.text === "string")
+    .map((p) => p.text)
+    .join("\n")
+    .trim();
+}

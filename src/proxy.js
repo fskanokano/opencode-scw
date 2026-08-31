@@ -6,7 +6,7 @@
 
 const crypto = require("crypto");
 const { normalizeModel, modelsPayload } = require("./zen-models");
-const { ensureRuntime, runPrompt } = require("./opencode");
+const { ensureRuntime, runPrompt, fetchProviders } = require("./opencode");
 
 function jsonResponse(statusCode, payload, extraHeaders) {
   return {
@@ -210,6 +210,24 @@ function finishResult(result, requestedModel, stream) {
 }
 
 async function handleModels() {
+  // 优先返回 opencode server 报告的真实模型清单；
+  // server 不可用时退回静态 ZEN_MODELS 列表。
+  try {
+    const oc = await ensureRuntime();
+    const providers = await fetchProviders(oc);
+    if (providers && providers.models.length) {
+      const created = Math.floor(Date.now() / 1000);
+      const data = providers.models.map((m) => ({
+        id: m.id,
+        object: "model",
+        created,
+        owned_by: m.owned_by || "opencode",
+      }));
+      return jsonResponse(200, { object: "list", data });
+    }
+  } catch (_e) {
+    /* fall through to static list */
+  }
   return jsonResponse(200, modelsPayload());
 }
 
@@ -268,7 +286,13 @@ module.exports.handleRequest = async function handleRequest(event, sessions) {
   }
 
   if (path === "/v1/health" && method === "GET") {
-    return jsonResponse(200, { status: "ok" });
+    // 健康检查同时探测 opencode server 是否可用。
+    try {
+      await ensureRuntime();
+      return jsonResponse(200, { status: "ok" });
+    } catch (err) {
+      return jsonResponse(200, { status: "degraded", detail: String((err && err.message) || err) });
+    }
   }
 
   return errorResponse(404, `未支持的接口：${method} ${path}（仅支持 GET /v1/models、POST /v1/chat/completions）`);

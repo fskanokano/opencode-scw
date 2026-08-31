@@ -75,10 +75,18 @@ echo "==> 校验二进制"
 echo "==> 组装 dist/stage"
 STAGE="dist/stage"
 rm -rf dist
-mkdir -p "$STAGE/bin" "$STAGE/src"
+mkdir -p "$STAGE/bin" "$STAGE/src" "$STAGE/node_modules"
 cp handler.js package.json "$STAGE/"
 cp src/*.js "$STAGE/src/"
 cp "$BIN" "$STAGE/bin/opencode"
+
+# 拷入 SDK 的运行时依赖（@opencode-ai/sdk + cross-spawn 依赖链）。
+# 注意：opencode-ai 与 opencode-* 平台二进制包（每个约 170MB）不需要进包——
+# 部署包里的 opencode 可执行文件就是 bin/opencode 这份官方制品。
+cp -r node_modules/@opencode-ai "$STAGE/node_modules/"
+for pkg in cross-spawn which isexe path-key shebang-command shebang-regex; do
+  [ -d "node_modules/$pkg" ] && cp -r "node_modules/$pkg" "$STAGE/node_modules/"
+done
 
 echo "==> 打包 dist/function.zip"
 if ! command -v zip >/dev/null 2>&1; then
