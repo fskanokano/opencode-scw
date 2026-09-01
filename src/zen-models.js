@@ -66,17 +66,17 @@ module.exports.ZEN_MODELS = [
 
 module.exports.DEFAULT_MODEL = "gpt-5.6-luna";
 
-// opencode 内部用 provider/id（例如 zen/gpt-5.6-luna）来选模型。
+// opencode 内部用 provider/id（例如 opencode/gpt-5.6-luna）来选模型；
+// 见 https://opencode.ai/docs/zen —— provider id 是 opencode，旧版代号 zen 已弃用。
 // OpenAI 客户端发过来的是裸 id（例如 gpt-5.6-luna），这里做规范化。
 module.exports.normalizeModel = function normalizeModel(requested) {
   let raw = (requested && String(requested).trim()) || module.exports.DEFAULT_MODEL;
   if (raw.includes("/")) {
-    // 兼容用户直接写 zen/xxx 或 opencode/xxx
-    if (raw.startsWith("opencode/")) raw = "zen/" + raw.slice("opencode/".length);
-    if (!raw.startsWith("zen/")) raw = "zen/" + raw;
+    // 兼容用户直接写 zen/xxx（旧命名）或 opencode/xxx / opencode-go/xxx（保留原样）
+    if (raw.startsWith("zen/")) raw = "opencode/" + raw.slice("zen/".length);
     return raw;
   }
-  return "zen/" + raw;
+  return "opencode/" + raw;
 };
 
 // 返回 OpenAI /v1/models 风格的数据

@@ -164,6 +164,25 @@ git push origin main
 > 注意：Serverless 有冷启动。第一次请求 opencode 要下载模型列表/初始化，会比后续慢几秒，
 > 属正常现象。调到 Serverless 容器最热后基本是即时响应。
 
+## opencode 原生接口全透传（web UI + 78 路由）
+
+常驻形态（`node handler.js`，Freebuff 托管 / 容器 / VPS）下，除 `/v1/*` 外的**全部
+路径**（opencode 原生 HTTP 路由、官方 web UI、SSE 事件流、WebSocket 终端）都原样透传
+给共享 opencode server，外部客户端可以把它当 opencode server 直接连：
+
+```
+你的 OpenAI 客户端  →  /v1/*           OpenAI 翻译层（Bearer PROXY_API_KEY）
+opencode server/CLI →  其它一切路径    原样透传（Bearer PROXY_API_KEY 或 Basic）
+浏览器              →  /  /app         opencode 官方 web UI（浏览器 Basic 登录框）
+```
+
+- **鉴权双通道**：`Bearer <PROXY_API_KEY>` 或 `Basic opencode:<密码>`（密码 =
+  `OPENCODE_SERVER_PASSWORD`，缺省回退 `PROXY_API_KEY`，一把钥匙开两道门）。
+- **凭据分离**：上行转发统一替换为内部 Basic，客户端凭据不达上游。
+- **长连接**：`/event` SSE 直通、`/pty/**/connect` WebSocket 字节级中继。
+- **事件模式限制**：Scaleway Function 事件入口（`exports.handle`）一次调用返回一个
+  响应，无法承载长连接路由——非 `/v1` 路径返回 `501` 明确提示，只有常驻形态有全能力。
+
 ## 怎么无缝使用（把它当原生 OpenAI）
 
 拿到你的函数 HTTPS 地址后，在任意 OpenAI 兼容客户端里设置：

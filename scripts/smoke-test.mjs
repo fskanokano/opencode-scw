@@ -66,6 +66,8 @@ const child = spawn(process.execPath, ["handler.js"], {
     OPENCODE_SDK_PORT: process.env.OPENCODE_SDK_PORT || "4097",
   },
   stdio: ["ignore", "pipe", "pipe"],
+  // 独立进程组：退出时连 opencode server 子进程一起清（防孤儿进程吃内存）
+  detached: true,
 });
 child.stdout.on("data", (d) => process.stdout.write(`[handler] ${d}`));
 child.stderr.on("data", (d) => process.stderr.write(`[handler:err] ${d}`));
@@ -75,7 +77,9 @@ try {
   let up = false;
   for (let i = 0; i < 40 && !up; i++) {
     try {
-      const r = await fetch(BASE + "/v1/health");
+      const r = await fetch(BASE + "/v1/health", {
+        headers: { authorization: `Bearer ${KEY}` },
+      });
       up = r.ok;
     } catch { await sleep(500); }
   }
@@ -132,7 +136,7 @@ try {
 } catch (err) {
   check("smoke test execution", false, String(err?.stack || err));
 } finally {
-  child.kill("SIGTERM");
+  try { process.kill(-child.pid, "SIGTERM"); } catch { child.kill("SIGTERM"); }
 }
 
 const failed = results.filter((r) => !r.ok);
