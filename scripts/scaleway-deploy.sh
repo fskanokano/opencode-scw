@@ -10,6 +10,8 @@ RUNTIME="${SCW_FUNCTION_RUNTIME:-node22}"
 HANDLER="${SCW_FUNCTION_HANDLER:-handler.handle}"
 MEMORY="${SCW_FUNCTION_MEMORY_LIMIT:-1024}"
 TIMEOUT="${SCW_FUNCTION_TIMEOUT:-300}"
+# scw 的 timeout 参数要求带单位的 duration（如 300s）；兼容旧配置里的裸数字，自动补 s。
+case "$TIMEOUT" in *[a-zA-Z]*) ;; *) TIMEOUT="${TIMEOUT}s" ;; esac
 PRIVACY="${SCW_FUNCTION_PRIVACY:-public}"
 MIN_SCALE="${SCW_FUNCTION_MIN_SCALE:-0}"
 MAX_SCALE="${SCW_FUNCTION_MAX_SCALE:-1}"
