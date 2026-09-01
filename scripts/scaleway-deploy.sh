@@ -88,3 +88,16 @@ run function deploy name="$FUNCTION_NAME" namespace-id="$NS_ID" runtime="$RUNTIM
 
 echo "==> 部署完成。函数地址："
 scw function function get "$FID" region="$REGION" -o json | json_field domain_name || true
+
+# 把关联的 Container Registry 命名空间设为 public（私有镜像存储收费，
+# public 免费至 75GB；镜像内不含密钥，环境变量在函数层）。幂等：已是 public 则无副作用。
+echo "==> 检查关联的 Container Registry 命名空间可见性……"
+REG_NS="$(scw registry namespace list region="$REGION" -o json)"
+REG_NS_ID="$(printf '%s' "$REG_NS" | json_field id)"
+REG_NS_PUBLIC="$(printf '%s' "$REG_NS" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const a=JSON.parse(s);const v=Array.isArray(a)?a[0]:a;console.log(v&&typeof v.is_public==='boolean'?String(v.is_public):'')}catch{console.log('')}})")"
+if [ -n "$REG_NS_ID" ] && [ "$REG_NS_PUBLIC" != "true" ]; then
+  echo "==> 设置 registry 命名空间 $REG_NS_ID 为 public……"
+  run registry namespace update "$REG_NS_ID" is-public=true region="$REGION"
+else
+  echo "==> registry 命名空间已是 public（或未找到），跳过。"
+fi
