@@ -225,7 +225,8 @@ function finishResult(result, requestedModel, stream, lastUserText) {
     });
   }
 
-  // 流式：分片成 SSE。
+  // 流式：分片成 SSE。思考过程先以 reasoning_content delta 发出（
+  // OpenAI 推理模型标准字段），正文再以 content delta 发出。
   let sse = sseSend({
     id,
     object: "chat.completion.chunk",
@@ -233,6 +234,17 @@ function finishResult(result, requestedModel, stream, lastUserText) {
     model: requestedModel,
     choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
   });
+  if (reasoning) {
+    for (const piece of chunkText(reasoning)) {
+      sse += sseSend({
+        id,
+        object: "chat.completion.chunk",
+        created,
+        model: requestedModel,
+        choices: [{ index: 0, delta: { reasoning_content: piece }, finish_reason: null }],
+      });
+    }
+  }
   for (const piece of chunkText(content)) {
     sse += sseSend({
       id,
