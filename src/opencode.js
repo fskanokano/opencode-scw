@@ -127,7 +127,7 @@ module.exports.ensureRuntime = function ensureRuntime() {
     const oc = await createOpencode({
       hostname: process.env.OPENCODE_SDK_HOST || DEFAULT_HOST,
       port: DEFAULT_PORT,
-      timeout: Number(process.env.OPENCODE_SDK_STARTUP_TIMEOUT_MS || 60000),
+      timeout: Number(process.env.OPENCODE_SDK_STARTUP_TIMEOUT_MS || 20000),
       config: {},
     });
 

@@ -8,7 +8,7 @@ NS_NAME="${SCW_FUNCTION_NAMESPACE:-}"
 FUNCTION_NAME="${SCW_FUNCTION_NAME:-opencode-proxy}"
 RUNTIME="${SCW_FUNCTION_RUNTIME:-node22}"
 HANDLER="${SCW_FUNCTION_HANDLER:-handler.handle}"
-MEMORY="${SCW_FUNCTION_MEMORY_LIMIT:-256}"
+MEMORY="${SCW_FUNCTION_MEMORY_LIMIT:-512}"
 TIMEOUT="${SCW_FUNCTION_TIMEOUT:-300}"
 # scw 的 timeout 参数要求带单位的 duration（如 300s）；兼容旧配置里的裸数字，自动补 s。
 case "$TIMEOUT" in *[a-zA-Z]*) ;; *) TIMEOUT="${TIMEOUT}s" ;; esac
