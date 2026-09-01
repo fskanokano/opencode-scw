@@ -36,7 +36,7 @@ json_field() {
 }
 
 echo "==> 区域      : $REGION"
-echo "==> 函数      : $FUNCTION_NAME (runtime=$RUNTIME handler=$HANDLER memory=${MEMORY}MB timeout=${TIMEOUT}s privacy=$PRIVACY)"
+echo "==> 函数      : $FUNCTION_NAME (runtime=$RUNTIME handler=$HANDLER memory=${MEMORY}MB timeout=$TIMEOUT privacy=$PRIVACY)"
 
 if [ -z "$NS_ID" ]; then
   if [ -n "$NS_NAME" ]; then
