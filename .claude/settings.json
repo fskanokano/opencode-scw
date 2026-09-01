@@ -1,5 +1,13 @@
 {
   "enabledPlugins": {
-    "superpowers@claude-plugins-official": true
+    "superpowers@superpowers-dev": true
+  },
+  "extraKnownMarketplaces": {
+    "superpowers-dev": {
+      "source": {
+        "source": "directory",
+        "path": ".claude/plugins/superpowers"
+      }
+    }
   }
 }
