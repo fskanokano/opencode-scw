@@ -89,7 +89,7 @@ jobs:
           SCW_FUNCTION_NAME: ${{ vars.SCW_FUNCTION_NAME || 'opencode-proxy' }}
           SCW_FUNCTION_RUNTIME: ${{ vars.SCW_FUNCTION_RUNTIME || 'node22' }}
           SCW_FUNCTION_HANDLER: ${{ vars.SCW_FUNCTION_HANDLER || 'handler.handle' }}
-          SCW_FUNCTION_MEMORY_LIMIT: ${{ vars.SCW_FUNCTION_MEMORY_LIMIT || '1024' }}
+          SCW_FUNCTION_MEMORY_LIMIT: ${{ vars.SCW_FUNCTION_MEMORY_LIMIT || '256' }}
           SCW_FUNCTION_TIMEOUT: ${{ vars.SCW_FUNCTION_TIMEOUT || '300' }}
           SCW_FUNCTION_PRIVACY: ${{ vars.SCW_FUNCTION_PRIVACY || 'public' }}
           SCW_FUNCTION_DEFAULT_MODEL: ${{ vars.SCW_FUNCTION_DEFAULT_MODEL }}

@@ -8,7 +8,7 @@ NS_NAME="${SCW_FUNCTION_NAMESPACE:-}"
 FUNCTION_NAME="${SCW_FUNCTION_NAME:-opencode-proxy}"
 RUNTIME="${SCW_FUNCTION_RUNTIME:-node22}"
 HANDLER="${SCW_FUNCTION_HANDLER:-handler.handle}"
-MEMORY="${SCW_FUNCTION_MEMORY_LIMIT:-1024}"
+MEMORY="${SCW_FUNCTION_MEMORY_LIMIT:-256}"
 TIMEOUT="${SCW_FUNCTION_TIMEOUT:-300}"
 # scw 的 timeout 参数要求带单位的 duration（如 300s）；兼容旧配置里的裸数字，自动补 s。
 case "$TIMEOUT" in *[a-zA-Z]*) ;; *) TIMEOUT="${TIMEOUT}s" ;; esac
@@ -73,6 +73,7 @@ if [ -z "$FID" ]; then
 else
   echo "==> 函数已存在 ($FID)，同步环境变量……"
   run function function update "$FID" \
+    memory-limit="$MEMORY" \
     "environment-variables.OPENCODE_API_KEY=$OPENCODE_API_KEY" \
     "environment-variables.PROXY_API_KEY=$PROXY_API_KEY" \
     ${DEFAULT_MODEL:+"environment-variables.OPENCODE_DEFAULT_MODEL=$DEFAULT_MODEL"} \
