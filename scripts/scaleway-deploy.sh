@@ -63,16 +63,27 @@ json_field() {
 echo "==> 区域      : $REGION"
 echo "==> 函数      : $FUNCTION_NAME (runtime=$RUNTIME handler=$HANDLER memory=${MEMORY}MB timeout=${TIMEOUT}s privacy=$PRIVACY)"
 
-# 1) 解析命名空间：支持显式 ID 或按名称查找；两者都不给就报错（避免乱部署到别的命名空间）
+# 1) 解析命名空间：显式 ID / 名称优先；都不提供时沿用控制台行为，
+# 自动使用当前项目和区域的第一个 namespace。没有 namespace 时创建默认 namespace。
 if [ -z "$NS_ID" ]; then
-  if [ -z "$NS_NAME" ]; then
-    echo "错误：请设置 SCW_FUNCTION_NAMESPACE_ID（推荐）或 SCW_FUNCTION_NAMESPACE（按名称查找）。" >&2
-    exit 1
-  fi
-  NS_ID="$(scw function namespace list name="$NS_NAME" region="$REGION" -o json 2>/dev/null | json_field id)"
-  if [ -z "$NS_ID" ]; then
-    echo "错误：找不到命名空间 $NS_NAME。请用 scw function namespace create name=$NS_NAME 先建好，或直接设置 SCW_FUNCTION_NAMESPACE_ID。" >&2
-    exit 1
+  if [ -n "$NS_NAME" ]; then
+    NS_ID="$(scw function namespace list name="$NS_NAME" region="$REGION" -o json | json_field id)"
+    if [ -z "$NS_ID" ]; then
+      echo "错误：找不到命名空间 $NS_NAME。" >&2
+      exit 1
+    fi
+  else
+    echo "==> 未指定 namespace，查询当前项目的默认 namespace……"
+    NS_ID="$(scw function namespace list region="$REGION" -o json | json_field id)"
+    if [ -z "$NS_ID" ]; then
+      echo "==> 没有现有 namespace，创建 opencode-default……"
+      run function namespace create name="opencode-default" region="$REGION"
+      NS_ID="$(scw function namespace list name="opencode-default" region="$REGION" -o json | json_field id)"
+    fi
+    if [ -z "$NS_ID" ]; then
+      echo "错误：无法解析或创建默认 namespace。" >&2
+      exit 1
+    fi
   fi
 fi
 echo "==> 命名空间  : $NS_ID"

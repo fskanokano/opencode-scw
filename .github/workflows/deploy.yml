@@ -13,8 +13,8 @@ name: Deploy to Scaleway
 #
 # 可选仓库变量（vars，非 secret）：
 #   SCW_DEFAULT_REGION        区域（默认 fr-par）
-#   SCW_FUNCTION_NAMESPACE_ID 函数命名空间 UUID（推荐设置；不设则用名称查找）
-#   SCW_FUNCTION_NAMESPACE    命名空间名称（SCW_FUNCTION_NAMESPACE_ID 未设置时用）
+#   SCW_FUNCTION_NAMESPACE_ID 函数命名空间 UUID（可选；不设则自动使用当前项目首个 namespace）
+#   SCW_FUNCTION_NAMESPACE    命名空间名称（可选；优先于自动发现）
 #   SCW_FUNCTION_NAME         函数名（默认 opencode-proxy）
 #   SCW_FUNCTION_RUNTIME      运行时（默认 node22）
 #   SCW_FUNCTION_MEMORY_LIMIT 内存 MB（默认 1024）
