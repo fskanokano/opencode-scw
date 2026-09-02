@@ -506,6 +506,7 @@ async function handler(req: Request): Promise<Response> {
       memory: {
         rssMB: Math.round(mem.rssMB),
         heapUsedMB: Math.round(mem.heapUsedMB),
+        heapTotalMB: Math.round(mem.heapTotalMB),
         limitMB: 768,
       },
     })

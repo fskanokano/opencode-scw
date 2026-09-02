@@ -110,30 +110,41 @@ export function ensureEngine(): Promise<AppLike> {
 }
 
 /**
- * 内存自监控：免费档 768MiB，超 620MB 告警（给线上水位留证据）。
- * 每分钟检查一次；静默期不刷屏。
+ * 内存自监控（免费档 768MiB）：
+ *  - >620MB 告警（留水位证据）
+ *  - >720MB 主动 Deno.exit(0)：平台的 OOM 杀发生在请求中途（客户端 500 + trace），
+ *    干净退出后平台重启 isolate（81MB 起步），把不可控死亡变成可控熔断。
+ *    阈值可用 OPENCODE_MEM_EXIT_MB 覆盖；仅引擎就绪后启动，不会干扰冷启动。
  */
 let monitorStarted = false
-export function memorySnapshot(): { rssMB: number; heapUsedMB: number } {
+export function memorySnapshot(): { rssMB: number; heapUsedMB: number; heapTotalMB: number } {
   try {
     const m = Deno.memoryUsage()
-    return { rssMB: m.rss / 1048576, heapUsedMB: m.heapUsed / 1048576 }
+    return { rssMB: m.rss / 1048576, heapUsedMB: m.heapUsed / 1048576, heapTotalMB: m.heapTotal / 1048576 }
   } catch {
-    return { rssMB: -1, heapUsedMB: -1 }
+    return { rssMB: -1, heapUsedMB: -1, heapTotalMB: -1 }
   }
 }
 
 function startMemoryMonitor(): void {
   if (monitorStarted) return
   monitorStarted = true
+  const exitMB = Number(process.env.OPENCODE_MEM_EXIT_MB || 720)
+  let warned = false
   setInterval(() => {
     const m = memorySnapshot()
-    if (m.rssMB > 620) {
-      console.warn(
-        `[engine] 内存告警 rss=${m.rssMB.toFixed(0)}MB heapUsed=${m.heapUsedMB.toFixed(0)}MB（768MiB 上限，接近会 OOM）`,
+    if (m.rssMB < 0) return
+    if (m.rssMB > exitMB) {
+      console.error(
+        `[engine] rss=${m.rssMB.toFixed(0)}MB 超过熔断阈值 ${exitMB}MB（768MiB 上限），主动退出让平台重启（干净自愈优于 OOM 暴杀）`,
       )
+      Deno.exit(0)
     }
-  }, 60_000)
+    if (m.rssMB > 620 && !warned) {
+      warned = true
+      console.warn(`[engine] 内存告警 rss=${m.rssMB.toFixed(0)}MB heapUsed=${m.heapUsedMB.toFixed(0)}MB（接近 768MiB 上限）`)
+    }
+  }, 15_000)
 }
 
 /** 进程内 fetch：path 形如 "/session" 或 "/session?x=1"。 */
