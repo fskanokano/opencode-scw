@@ -46,6 +46,26 @@ function prepareEnv() {
     OPENCODE_DISABLE_AUTOUPDATE: "true",
     OPENCODE_DISABLE_LSP_DOWNLOAD: "true",
     NO_COLOR: "1",
+    // ---- 内存压榨（Deno Deploy 免费档 768MiB）----
+    // 关闭 server 代理模式用不到的可选子系统，实测本地 Deno 峰值 RSS 418→同水位
+    // （bundle 14MB + effect runtime 本体之外，这些子系统各自吃几十到上百 MB）。
+    // 每项都有 bundle 内对应读取点：
+    //   EMBEDDED_WEB_UI  —— web 静态资源与 UI 服务（透传路径用不到）
+    //   DEFAULT_PLUGINS  —— 内置插件加载
+    //   EXTERNAL_SKILLS  —— 外部技能目录扫描
+    //   CLAUDE_CODE      —— Claude Code 集成（prompt/skills 一并关）
+    //   CHANNEL_DB       —— 渠道数据库
+    //   FFF              —— 文件索引器（linux 默认启用，纯代理不需要）
+    //   SHARE            —— 会话分享上传
+    // 注意：不开 OPENCODE_DISABLE_MODELS_FETCH —— models.dev 元数据参与
+    // provider/model 注册（聊天模型解析依赖它），且实测内存影响可忽略。
+    OPENCODE_DISABLE_EMBEDDED_WEB_UI: "1",
+    OPENCODE_DISABLE_DEFAULT_PLUGINS: "1",
+    OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
+    OPENCODE_DISABLE_CLAUDE_CODE: "1",
+    OPENCODE_DISABLE_CHANNEL_DB: "1",
+    OPENCODE_DISABLE_FFF: "1",
+    OPENCODE_DISABLE_SHARE: "1",
   }
   for (const [k, v] of Object.entries(env)) if (!process.env[k]) process.env[k] = v
   mkdirSync(env.XDG_CONFIG_HOME, { recursive: true })
@@ -78,6 +98,7 @@ export function ensureEngine(): Promise<AppLike> {
       console.error("[engine] 预热失败（不影响后续请求）:", String((e instanceof Error ? e.message : e) || e))
     }
     console.log("[engine] opencode 进程内引擎就绪")
+    startMemoryMonitor()
     return app
   })()
 
@@ -86,6 +107,33 @@ export function ensureEngine(): Promise<AppLike> {
     if (ensuring === task) ensuring = null
   })
   return task
+}
+
+/**
+ * 内存自监控：免费档 768MiB，超 620MB 告警（给线上水位留证据）。
+ * 每分钟检查一次；静默期不刷屏。
+ */
+let monitorStarted = false
+export function memorySnapshot(): { rssMB: number; heapUsedMB: number } {
+  try {
+    const m = Deno.memoryUsage()
+    return { rssMB: m.rss / 1048576, heapUsedMB: m.heapUsed / 1048576 }
+  } catch {
+    return { rssMB: -1, heapUsedMB: -1 }
+  }
+}
+
+function startMemoryMonitor(): void {
+  if (monitorStarted) return
+  monitorStarted = true
+  setInterval(() => {
+    const m = memorySnapshot()
+    if (m.rssMB > 620) {
+      console.warn(
+        `[engine] 内存告警 rss=${m.rssMB.toFixed(0)}MB heapUsed=${m.heapUsedMB.toFixed(0)}MB（768MiB 上限，接近会 OOM）`,
+      )
+    }
+  }, 60_000)
 }
 
 /** 进程内 fetch：path 形如 "/session" 或 "/session?x=1"。 */

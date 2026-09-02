@@ -9,3 +9,4 @@ vendor/*
 .env
 *.log
 function/opencode
+.tools/

@@ -9,7 +9,7 @@
     "runtime": {
       "type": "dynamic",
       "entrypoint": "deno/main.ts",
-      "memory_limit": "2GB"
+      "memory_limit": "768MB"
     }
   }
 }

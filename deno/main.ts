@@ -12,7 +12,7 @@
  * Node 形态的内部 Basic 双门在 Deno 路径不存在。
  */
 
-import { engineFetch, engineReady, ensureEngine } from "./engine.ts"
+import { engineFetch, engineReady, ensureEngine, memorySnapshot } from "./engine.ts"
 import { SSE_HEADERS, createSseWriter, sseLines } from "./stream.ts"
 
 // ---- 纯函数复用（Deno 支持 CJS require 走 node: 兼容层）----
@@ -499,7 +499,16 @@ async function handler(req: Request): Promise<Response> {
 
   // /v1/* OpenAI 翻译层
   if (path === "/v1/health" && req.method === "GET") {
-    return jsonResponse({ status: "ok", engine: engineReady() ? "ready" : "starting" })
+    const mem = memorySnapshot()
+    return jsonResponse({
+      status: "ok",
+      engine: engineReady() ? "ready" : "starting",
+      memory: {
+        rssMB: Math.round(mem.rssMB),
+        heapUsedMB: Math.round(mem.heapUsedMB),
+        limitMB: 768,
+      },
+    })
   }
 
   if (path === "/v1/models" && req.method === "GET") {
