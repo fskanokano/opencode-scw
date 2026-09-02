@@ -7,7 +7,12 @@
   "scripts": {
     "build": "sh scripts/build.sh",
     "local": "node scripts/run-local.mjs",
-    "package:scw": "sh scripts/build.sh"
+    "package:scw": "sh scripts/build.sh",
+    "deno": "deno run --allow-all deno/main.ts",
+    "vendor": "bun scripts/vendor-opencode.mjs",
+    "test:deno": "node scripts/test-deno.mjs",
+    "test:multiturn": "node scripts/test-multiturn.mjs",
+    "test:node": "node scripts/smoke-test.mjs && node scripts/test-bridge.mjs"
   },
   "engines": {
     "node": ">=18"

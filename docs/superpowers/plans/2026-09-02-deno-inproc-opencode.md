@@ -63,7 +63,7 @@
 - [x] **Step 4: spike 结论记录**
   - 结论（通过/失败 + 失败点 + 实际补丁清单）写进 `vendor/MANIFEST.json` 与 spec §8 验收记录
 
-- [ ] **Step 5: commit（vendor 脚本 + MANIFEST + 冒烟脚本 + spec 验收记录）**
+- [x] **Step 5: commit（vendor 脚本 + MANIFEST + 冒烟脚本 + spec 验收记录）**
 
 ---
 
@@ -74,10 +74,10 @@
 - Create: `vendor/MANIFEST.json` 最终版（version / tarball SHA256 / patches 列表 / 构建命令 / 产物 SHA256）
 - Create: `.gitignore` 增量（忽略 vendor 工作目录，保留 `vendor/dist/` 产物）
 
-- [ ] **Step 1: 参数化与锁版本**（OPENCODE_VERSION 常量 + 环境变量覆盖；SHA256 不匹配即 fail）
-- [ ] **Step 2: 幂等重建**（重复执行结果一致；patches 按 MANIFEST 列表顺序应用，`git apply --check` 预检）
-- [ ] **Step 3: 产物校验**（Node + Deno 双加载冒烟内置于脚本，未过校验不得写 `vendor/dist/`）
-- [ ] **Step 4: commit**
+- [x] **Step 1: 参数化与锁版本**（OPENCODE_VERSION 常量 + 环境变量覆盖；SHA256 不匹配即 fail）
+- [x] **Step 2: 幂等重建**（重复执行结果一致；patches 按 MANIFEST 列表顺序应用，`git apply --check` 预检）
+- [x] **Step 3: 产物校验**（Node + Deno 双加载冒烟内置于脚本，未过校验不得写 `vendor/dist/`）
+- [x] **Step 4: commit**
 
 ## Task 2: deno/ 入口三件套（TDD：先写 test-deno.mjs 失败断言）
 
@@ -88,21 +88,21 @@
 
 **复用约束**：`extractUserPrompt`/`mapVariant`/`normalizeModel`/`sessionKeyFor`/`stripEcho` 等纯函数从 `src/*.js` 直接 import（Deno 支持 CJS require 走 node: 兼容层；不可用时在 deno/ 内最小复刻并注释对齐来源）。`src/*` 与 `handler.js` 零改动。
 
-- [ ] **Step 1: RED** —— 写 `scripts/test-deno.mjs`：起 `deno run --allow-all deno/main.ts` → 黑盒断言（无 key 401 / health / models / 流式首帧 / 透传 404 / 错误结构），确认按预期失败
-- [ ] **Step 2: GREEN** —— 实现 engine.ts → stream.ts → main.ts（最小实现），逐断言转绿
-- [ ] **Step 3: REFACTOR** —— 去重、命名、对齐现有代码风格；保持全绿
+- [x] **Step 1: RED** —— 写 `scripts/test-deno.mjs`：起 `deno run --allow-all deno/main.ts` → 黑盒断言（无 key 401 / health / models / 流式首帧 / 透传 404 / 错误结构），确认按预期失败
+- [x] **Step 2: GREEN** —— 实现 engine.ts → stream.ts → main.ts（最小实现），逐断言转绿
+- [x] **Step 3: REFACTOR** —— 去重、命名、对齐现有代码风格；保持全绿
 
 ## Task 3: 流式与多轮验收（本地）
 
-- [ ] **Step 1**: `stream:true` 请求看到逐帧 SSE（首帧 < 冷启动+首 token 时延）与最终 usage
-- [ ] **Step 2**: 多轮续聊上下文延续（x-session-id / 会话锚定）
-- [ ] **Step 3**: 客户端断连 → `req.signal` abort 上游读取（日志无异常堆积）
+- [x] **Step 1**: `stream:true` 请求看到逐帧 SSE（首帧 < 冷启动+首 token 时延）与最终 usage
+- [x] **Step 2**: 多轮续聊上下文延续（x-session-id / 会话锚定）—— `scripts/test-multiturn.mjs` M1
+- [x] **Step 3**: 客户端断连 → abort 上游读取（日志无异常堆积）—— M2/M3。实现备注：Deno legacy serve 在 Response 返回后 abort `req.signal`，断连检测改用 SSE ReadableStream 的 cancel 回调（deno/stream.ts `onCancel`）
 
 ## Task 4: Node 常驻形态回归关卡
 
-- [ ] **Step 1**: `node scripts/smoke-test.mjs` → 5/5
-- [ ] **Step 2**: `node scripts/test-bridge.mjs` → 21/21
-- [ ] **Step 3**: 任何回归 → 回滚 deno/ 侧改动（Node 路径零改动是硬约束）
+- [x] **Step 1**: `node scripts/smoke-test.mjs` → 5/5
+- [x] **Step 2**: `node scripts/test-bridge.mjs` → 20/21（显式凭据；T8 失败为沙箱网络拉不到完整 models.dev 目录、/config/providers 载荷 5002B < 10000B 阈值的数据问题，非桥接回归——git 证实 Node 路径零改动。注：项目根无 .env 文件，环境变量未设时 test-bridge 以空 PROXY_API_KEY 运行会大面积 401，需显式传 `PROXY_API_KEY=... node scripts/test-bridge.mjs`）
+- [x] **Step 3**: 任何回归 → 回滚 deno/ 侧改动（Node 路径零改动是硬约束）—— 无回归，未回滚
 
 ## Task 5: Deno Deploy 配置与文档
 
@@ -110,8 +110,8 @@
 - Create: `deno.json`（task: `dev` = `deno run --allow-all deno/main.ts`；compilerOptions 可选）
 - Modify: `README.md`（Deno 方案章节：架构图、env 表、Deno Deploy 连接 GitHub 步骤、内存语义如实声明）
 
-- [ ] **Step 1**: deno.json + README
-- [ ] **Step 2**: commit 全部产物
+- [x] **Step 1**: deno.json + README
+- [x] **Step 2**: commit 全部产物
 
 ---
 

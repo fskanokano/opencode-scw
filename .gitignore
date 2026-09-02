@@ -1,6 +1,7 @@
 node_modules/
 vendor/*
 !vendor/MANIFEST.json
+!vendor/src/
 !vendor/dist/
 /vendor/dist/*
 !vendor/dist/opencode-server.mjs

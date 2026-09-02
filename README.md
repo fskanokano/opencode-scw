@@ -1,9 +1,111 @@
-# opencode-scw —— 在 Scaleway Serverless Function 里跑"原汁原味"的 opencode
+# opencode-scw —— 跑"原汁原味"的 opencode（Deno 进程内 / Scaleway Function 双形态）
 
-把一个真实的 [OpenCode](https://github.com/anomalyco/opencode) 放进 Scaleway
-Serverless Function，外面套一个 OpenAI 兼容接口。你把任意 OpenAI 客户端的
-`baseURL` 指到函数的地址，就能当一个"原生 OpenAI 服务"来用——底下跑的都是
-真正的 opencode，而不是我们重写的大模型代理。
+把一个真实的 [OpenCode](https://github.com/anomalyco/opencode) 嵌进服务进程，外面套一个
+OpenAI 兼容接口。你把任意 OpenAI 客户端的 `baseURL` 指到服务地址，就能当一个"原生 OpenAI
+服务"来用——底下跑的都是真正的 opencode，而不是我们重写的大模型代理。
+
+**两种形态**：
+
+| 形态 | 入口 | 状态 |
+| --- | --- | --- |
+| **Deno 进程内**（推荐） | `deno task dev`（`deno/main.ts`） | opencode 以预编译 bundle 直接嵌入 Deno 进程，零子进程、单门制、端到端真流式。部署目标 [Deno Deploy](https://deno.com/deploy)：连接 GitHub 仓库 + dev 分支，**推送即部署** |
+| **Scaleway Function** | `handler.js`（`exports.handle`） | 旧形态，保留；常驻形态 `node handler.js` 仍支持全透传 |
+
+---
+
+## Deno 进程内形态（方案 A，主力）
+
+### 架构
+
+```
+GitHub 仓库（dev 分支）
+   │ git push → Deno Deploy GitHub 集成自动构建部署
+   ▼
+┌─ Deno Deploy 实例（标准 Deno 2.5+，--allow-all）────────────────┐
+│  deno/main.ts —— 唯一新入口                                      │
+│    ├─ OPTIONS          → 204 + CORS                             │
+│    ├─ checkAuth        → Bearer PROXY_API_KEY（单门制，fail closed）│
+│    ├─ /v1/health       → 200（含引擎就绪状态）                   │
+│    ├─ /v1/models       → 进程内 /config/providers → OpenAI list  │
+│    ├─ /v1/chat/*       → OpenAI 翻译层 + 真流式（SSE 逐帧）      │
+│    └─ 其余路径          → engine.fetch(req) 原样透传             │
+│  deno/engine.ts —— 进程内 opencode 引擎适配器                     │
+│    import { app } from vendor/dist/opencode-server.mjs           │
+│    （app.fetch 直调，零套接字、无端口、无内部 Basic 门）          │
+│  deno/stream.ts —— Web Streams 版 SSE 写器/解析器                │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+与 Scaleway 形态的本质区别：**opencode 不再是子进程**。上游源码经
+`scripts/vendor-opencode.mjs` 流水线（下载锁定版本 tarball → SHA256 校验 →
+Bun.build conditions=node → 双运行时冒烟）预编译成 `vendor/dist/opencode-server.mjs`
+（提交进仓库），Deno 入口动态 import 后直接 `app.fetch()` 进程内调用——单进程单运行时，
+省掉第二份运行时与子进程管理开销；上游源文件逻辑改动为零。
+
+### 环境变量（Deno 形态）
+
+| 变量 | 必填 | 说明 |
+| --- | --- | --- |
+| `PROXY_API_KEY` | ✅ | 代理访问密钥，所有请求必须带 `Authorization: Bearer <PROXY_API_KEY>`；未配置时 fail closed |
+| `OPENCODE_API_KEY`（或 `OPENCODE_ZEN_API_KEY`） | ✅（真对话） | opencode Zen API Key，写进引擎的 `auth.json`；不配也能起服务，但 LLM 调用会失败 |
+| `OPENCODE_DEFAULT_MODEL` | ｜ | 默认模型（请求不带 `model` 时用） |
+| `OPENCODE_DATA_HOME` | ｜ | 引擎数据目录（默认 `$TMPDIR/opencode-deno-data`） |
+| `OPENCODE_AUTO_APPROVE` | ｜ | `false` 关闭 agent 工具权限自动放行 |
+| `OPENCODE_STREAM_SMOOTHING` / `OPENCODE_STREAM_CHUNK` / `OPENCODE_STREAM_DELAY_MS` | ｜ | 打字机节奏（默认开，8 字符 / 45ms；`SMOOTHING=false` 直出） |
+| `PORT` | ｜ | 监听端口（Deno Deploy 自动注入；本地默认 8787） |
+
+### 本地跑
+
+```bash
+bun install                        # src/*.js 纯函数复用需要 node_modules
+PROXY_API_KEY=test deno task dev   # 或 deno run --allow-all deno/main.ts
+
+# 另一个终端
+OPENCODE_API_KEY=<Zen key> deno task test        # 黑盒 D1–D10（自起服务）
+OPENCODE_API_KEY=<Zen key> deno task test:multiturn  # 多轮续聊 + 断连中止（自起服务）
+
+curl -s http://127.0.0.1:8787/v1/models -H "Authorization: Bearer test"
+curl -sN http://127.0.0.1:8787/v1/chat/completions \
+  -H "Authorization: Bearer test" -H "content-type: application/json" \
+  -d '{"model":"opencode/big-pickle","stream":true,"messages":[{"role":"user","content":"数到三"}]}'
+```
+
+### 部署到 Deno Deploy（连接 GitHub，推送即部署）
+
+1. 打开 [dash.deno.com](https://dash.deno.com) → **New Playground** 旁选 **Deploy from GitHub**（或现有项目 → Settings → Git Integration）；
+2. 授权 GitHub 后选择本仓库、分支 **`dev`**；
+3. 入口点填 **`deno/main.ts`**，其他留空即可（Deno Deploy 自动 `deno main.ts` 语义）；
+4. 在项目 **Settings → Environment Variables** 添加 `PROXY_API_KEY` 与 `OPENCODE_API_KEY`（必填两个）；
+5. 保存后首次部署启动；之后 **每次 `git push` 到 dev 自动重新部署**，无需手动操作。
+
+线上验收：
+
+```bash
+curl -s https://<your-project>.deno.dev/v1/health -H "Authorization: Bearer <PROXY_API_KEY>"
+# → {"status":"ok","engine":"ready"}
+```
+
+### 内存与状态语义（如实声明）
+
+- 单进程单运行时。opencode 引擎自身 RSS（数百 MB 级）是内存大头，进程内方案省掉的是
+  第二份运行时 + 子进程管理开销，不是 opencode 本身的占用。
+- Deno Deploy 实例空闲休眠（5s~10min）后，内存态 `sessions` Map 与引擎 SQLite 随实例消亡；
+  会话锚定靠客户端重发完整历史即可续聊（多轮语义与 Scaleway 形态一致）。
+- 多实例完全隔离，无跨实例共享状态；单实例即可满足当前流量。
+
+### 升级 opencode 上游
+
+```bash
+OPENCODE_VERSION=v1.19.x bun run vendor   # 重跑流水线：下载→校验→构建→双运行时冒烟
+# MANIFEST 与产物有变更则一并提交；补丁预算 ≤5 个解析级微补丁（当前 0）
+```
+
+---
+
+## Scaleway Function 形态（旧形态，保留）
+
+把一个真实的 opencode 放进 Scaleway Serverless Function。以下为原 Scaleway 方案的
+使用与部署说明。
 
 ## 核心思路（重要）
 
@@ -48,6 +150,16 @@ server**（常驻子进程），拿到类型安全 client；之后所有请求�
 ## 项目结构
 
 ```
+deno/main.ts            # Deno 进程内形态入口（推荐）
+deno/engine.ts          # 进程内 opencode 引擎适配器（app.fetch 直调）
+deno/stream.ts          # Web Streams 版 SSE 写器/解析器
+deno.json               # deno task dev / test / test:multiturn
+vendor/src/entry.ts     # bundle 入口（re-export 上游进程内 app）
+vendor/dist/opencode-server.mjs  # 预编译 opencode bundle（提交进仓库）
+vendor/MANIFEST.json    # 上游版本 / SHA256 / 补丁清单 / 构建记录
+scripts/vendor-opencode.mjs  # vendor 流水线（下载→校验→构建→冒烟）
+scripts/test-deno.mjs   # Deno 形态黑盒测试 D1–D10（自起服务）
+scripts/test-multiturn.mjs   # 多轮续聊 + 断连中止验收（自起服务）
 handler.js              # Scaleway 入口（导出 handle）；node dist/handler.js 也能本地跑
 src/opencode.js         # 通过 @opencode-ai/sdk 启动并复用共享 opencode server
 src/proxy.js            # OpenAI 兼容适配层：/v1/models、/v1/chat/completions
@@ -55,6 +167,8 @@ src/zen-models.js       # 静态 Zen 模型清单（作为 server 不可用时�
 scripts/build.sh           # 一键打包 dist/function.zip（含官方 opencode 二进制 + SDK 依赖）
 scripts/scaleway-deploy.sh # 把 dist/function.zip 部署到 Scaleway（供 CICD 调用）
 scripts/run-local.mjs      # 本地联调启动器（会先打包）
+scripts/smoke-test.mjs  # Node 常驻形态冒烟 5 项
+scripts/test-bridge.mjs # Node 常驻形态黑盒 T1–T18
 .github/workflows/deploy.yml          # 推送到 main 自动打包并部署到 Scaleway
 .github/workflows/build-function.yml  # 手动一键打包 function.zip（只打包不部署）
 env.example                # 环境变量模板
