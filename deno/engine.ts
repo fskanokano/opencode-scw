@@ -131,7 +131,8 @@ export function memorySnapshot(): {
       heapUsedMB: m.heapUsed / 1048576,
       heapTotalMB: m.heapTotal / 1048576,
       externalMB: m.external / 1048576,
-      buffersMB: m.buffers / 1048576,
+      // Deno.memoryUsage 无 buffers 字段（Node 才有），缺失时报 -1
+      buffersMB: m.buffers != null ? m.buffers / 1048576 : -1,
     }
   } catch {
     return { rssMB: -1, heapUsedMB: -1, heapTotalMB: -1, externalMB: -1, buffersMB: -1 }
