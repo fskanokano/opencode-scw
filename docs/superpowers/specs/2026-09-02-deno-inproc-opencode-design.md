@@ -171,6 +171,26 @@ spike 范围（一次性验证，产物丢弃或收编，不算正式实现）�
   ② 或 ④ 失败 → 记录失败点，评估微补丁能否救；救不动 → 回退方案 B 并更新本 spec
 ```
 
+### §8.1 验收记录（2026-09-02，spike 已执行）
+
+**结论：①②③④ 全部通过 → 方案 A 落地。**
+
+| # | 硬门 | 结果 | 说明 |
+|---|---|---|---|
+| ① | bun build 出 bundle | ✅ | 3246 模块 / ~0.9s / 14.0MB + 4 wasm 资源（`Bun.build` target=node conditions=node minify） |
+| ② | node 加载 → app.fetch(GET /doc) 200 | ✅ | `scripts/vendor-smoke.mjs` 4/4；进程内零套接字 |
+| ③ | deno 加载同 bundle | ✅ | 同脚本 deno 2.9.6 `--allow-all` 4/4 |
+| ④ | 链路通 | ✅ | 超预期：`POST /session` 直接 200（opencode server 进程内完整初始化，无需 LLM key）；`GET /event` SSE 响应到达 |
+
+**情报收集核实（对 §0 事实表）**：
+- F6 ✅ 实测：`Default = lazy(() => ({ app }))`，`Default()` → `{ app }`；`app.fetch(Request)` 纯 Web 签名
+- F2 ✅ 实测：core `#sqlite`/`#pty`/`#fff` + opencode `#db` 四组条件导入齐备；`--conditions=node` 下自动落 node 变体
+- `bun:*` 残留：仅 2 处 type-only import（编译期消失）；`bun:sqlite`/`bun-pty` 全部隔离在 `.bun.ts` 变体文件
+
+**唯一构建期修正（0 文件补丁）**：`jsonc-parser` 的 UMD 构建（`factory(require, exports)` 模式）bun 打包后留下运行时相对 `require("./impl/format")`，bundle 加载即崩。解法：`Bun.build` 插件把它重定向到包内自带 ESM 构建（`lib/esm/main.js`），纯静态 import 内联成功。不占 ≤5 补丁预算（补丁数保持 0）。
+
+**产物与留痕**：`vendor/dist/opencode-server.mjs` + `vendor/MANIFEST.json`（版本/SHA256/补丁清单/冒烟记录）；流水线脚本 `scripts/vendor-opencode.mjs`（可重复构建），冒烟脚本 `scripts/vendor-smoke.mjs`。
+
 ## 9. 测试策略（TDD）
 
 - Deno 侧新增 `scripts/test-deno.mjs`（黑盒）：鉴权 / health / models / 流式首帧 / 透传 404 / 错误结构。

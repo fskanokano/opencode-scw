@@ -1,0 +1,18 @@
+{
+  "version": "v1.18.25",
+  "tarball_url": "https://github.com/anomalyco/opencode/archive/refs/tags/v1.18.25.tar.gz",
+  "tarball_sha256": "44e9530d7be172005c7d60aef317440eecb85d557d94cce7fa35c5a7b9d9da0b",
+  "bundle": "dist/opencode-server.mjs",
+  "bundle_sha256": "eb78cbf2b918e85fe910e52b94bb71587623a19592e74b577ce0451fad5e9ab9",
+  "build": {
+    "tool": "bun 1.3.14",
+    "flags": "target=node, conditions=node, minify",
+    "plugins": [
+      "jsonc-parser-esm-redirect（bun 不支持其 UMD 工厂模式，重定向到 lib/esm/main.js）"
+    ]
+  },
+  "patches": [],
+  "dep_fixups": [
+    "jsonc-parser: 构建期重定向到 ESM 构建（插件实现，零文件补丁）"
+  ]
+}

@@ -1,6 +1,10 @@
 node_modules/
-vendor/
-dist/
+vendor/*
+!vendor/MANIFEST.json
+!vendor/dist/
+/vendor/dist/*
+!vendor/dist/opencode-server.mjs
+/dist/
 .env
 *.log
 function/opencode
