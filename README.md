@@ -75,8 +75,17 @@ curl -sN http://127.0.0.1:8787/v1/chat/completions \
 1. 打开 [dash.deno.com](https://dash.deno.com) → **New Playground** 旁选 **Deploy from GitHub**（或现有项目 → Settings → Git Integration）；
 2. 授权 GitHub 后选择本仓库、分支 **`dev`**；
 3. 入口点填 **`deno/main.ts`**，其他留空即可（Deno Deploy 自动 `deno main.ts` 语义）；
-4. 在项目 **Settings → Environment Variables** 添加 `PROXY_API_KEY` 与 `OPENCODE_API_KEY`（必填两个）；
-5. 保存后首次部署启动；之后 **每次 `git push` 到 dev 自动重新部署**，无需手动操作。
+4.   在项目 **Settings → Environment Variables** 添加 `PROXY_API_KEY` 与 `OPENCODE_API_KEY`（必填两个）；
+
+5. **Install command 填 `npm install --omit=dev`**（不是 `npm install`）。
+   `opencode-ai` 是 devDependency，其 postinstall 会在安装时往临时目录拉 184MB 的
+   平台二进制（`opencode-linux-x64`）再拷贝，Deno Deploy 的构建沙箱里这一步会
+   exit 1 导致**构建失败**。而 Deno 进程内路径跑在预编译的 `vendor/dist/…mjs` 上，
+   无需该二进制；`--omit=dev` 跳过 devDeps，只留运行时需要的 `@opencode-ai/sdk`
+   （纯 JS，无 postinstall）。
+6. **Build command 留空**；Deno Deploy 会以 `deno/main.ts` 作为入口直接构建。
+
+保存后首次部署启动；之后 **每次 `git push` 到 dev 自动重新部署**，无需手动操作。
 
 线上验收：
 
