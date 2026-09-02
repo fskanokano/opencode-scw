@@ -12,7 +12,7 @@
  * Node 形态的内部 Basic 双门在 Deno 路径不存在。
  */
 
-import { engineFetch, engineReady, ensureEngine, memorySnapshot } from "./engine.ts"
+import { bootUptimeSec, engineFetch, engineReady, ensureEngine, memorySnapshot } from "./engine.ts"
 import { SSE_HEADERS, createSseWriter, sseLines } from "./stream.ts"
 
 // ---- 纯函数复用（Deno 支持 CJS require 走 node: 兼容层）----
@@ -507,8 +507,11 @@ async function handler(req: Request): Promise<Response> {
         rssMB: Math.round(mem.rssMB),
         heapUsedMB: Math.round(mem.heapUsedMB),
         heapTotalMB: Math.round(mem.heapTotalMB),
+        externalMB: Math.round(mem.externalMB),
+        buffersMB: Math.round(mem.buffersMB),
         limitMB: 768,
       },
+      uptimeSec: bootUptimeSec(),
     })
   }
 

@@ -116,14 +116,31 @@ export function ensureEngine(): Promise<AppLike> {
  *    干净退出后平台重启 isolate（81MB 起步），把不可控死亡变成可控熔断。
  *    阈值可用 OPENCODE_MEM_EXIT_MB 覆盖；仅引擎就绪后启动，不会干扰冷启动。
  */
-let monitorStarted = false
-export function memorySnapshot(): { rssMB: number; heapUsedMB: number; heapTotalMB: number } {
+const BOOT_TS = Date.now()
+export function memorySnapshot(): {
+  rssMB: number
+  heapUsedMB: number
+  heapTotalMB: number
+  externalMB: number
+  buffersMB: number
+} {
   try {
     const m = Deno.memoryUsage()
-    return { rssMB: m.rss / 1048576, heapUsedMB: m.heapUsed / 1048576, heapTotalMB: m.heapTotal / 1048576 }
+    return {
+      rssMB: m.rss / 1048576,
+      heapUsedMB: m.heapUsed / 1048576,
+      heapTotalMB: m.heapTotal / 1048576,
+      externalMB: m.external / 1048576,
+      buffersMB: m.buffers / 1048576,
+    }
   } catch {
-    return { rssMB: -1, heapUsedMB: -1, heapTotalMB: -1 }
+    return { rssMB: -1, heapUsedMB: -1, heapTotalMB: -1, externalMB: -1, buffersMB: -1 }
   }
+}
+
+/** isolate 启动时间（health 用于判断是否重启过）。 */
+export function bootUptimeSec(): number {
+  return Math.round((Date.now() - BOOT_TS) / 1000)
 }
 
 function startMemoryMonitor(): void {
@@ -142,7 +159,9 @@ function startMemoryMonitor(): void {
     }
     if (m.rssMB > 620 && !warned) {
       warned = true
-      console.warn(`[engine] 内存告警 rss=${m.rssMB.toFixed(0)}MB heapUsed=${m.heapUsedMB.toFixed(0)}MB（接近 768MiB 上限）`)
+      console.warn(
+        `[engine] 内存告警 rss=${m.rssMB.toFixed(0)}MB heap=${m.heapUsedMB.toFixed(0)}/${m.heapTotalMB.toFixed(0)}MB ext=${m.externalMB.toFixed(0)}MB buf=${m.buffersMB.toFixed(0)}MB（接近 768MiB 上限）`,
+      )
     }
   }, 15_000)
 }
