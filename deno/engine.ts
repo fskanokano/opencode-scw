@@ -138,6 +138,8 @@ export function memorySnapshot(): {
   }
 }
 
+let monitorStarted = false
+
 /** isolate 启动时间（health 用于判断是否重启过）。 */
 export function bootUptimeSec(): number {
   return Math.round((Date.now() - BOOT_TS) / 1000)
