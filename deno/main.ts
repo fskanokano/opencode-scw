@@ -12,7 +12,7 @@
  * Node 形态的内部 Basic 双门在 Deno 路径不存在。
  */
 
-import { engineFetch, engineReady } from "./engine.ts"
+import { engineFetch, engineReady, ensureEngine } from "./engine.ts"
 import { SSE_HEADERS, createSseWriter, sseLines } from "./stream.ts"
 
 // ---- 纯函数复用（Deno 支持 CJS require 走 node: 兼容层）----
@@ -540,6 +540,13 @@ async function handler(req: Request): Promise<Response> {
 // ---- 启动 ----
 const port = Number(process.env.PORT || 8787)
 console.log(`[deno] 监听 0.0.0.0:${port}（OpenAI 接口 /v1/* + opencode 全接口透传）`)
+
+// 后台预热（serverless 关键路径）：线上实测引擎冷启动 30-48s，由首个请求惰性
+// 承担初始化时平台会中途杀掉该请求（500），而初始化本身在后台继续完成。
+// 改为 isolate 启动即触发、请求无关地后台推进，用户请求到达时直接命中 ready 引擎。
+void ensureEngine().catch((e) => {
+  console.error("[deno] 后台引擎预热失败（将由下个请求重试）:", String((e as Error).message || e))
+})
 Deno.serve({ port, hostname: "0.0.0.0" }, async (req) => {
   try {
     return await handler(req)
