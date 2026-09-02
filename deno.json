@@ -3,5 +3,13 @@
     "dev": "deno run --allow-all deno/main.ts",
     "test": "node scripts/test-deno.mjs",
     "test:multiturn": "node scripts/test-multiturn.mjs"
+  },
+  "deploy": {
+    "install": "npm install --omit=dev",
+    "runtime": {
+      "type": "dynamic",
+      "entrypoint": "deno/main.ts",
+      "memory_limit": "2GB"
+    }
   }
 }
