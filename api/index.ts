@@ -27,8 +27,8 @@ const { mapVariant, extractTokens } = require("../src/opencode.js") as {
   extractTokens: (info: unknown) => Record<string, number>
 }
 
-import { bootUptimeSec, engineFetch, engineReady, ensureEngine, memorySnapshot } from "./engine.ts"
-import { SSE_HEADERS, createSseWriter, sseLines } from "./stream.ts"
+import { bootUptimeSec, engineFetch, engineReady, ensureEngine, memorySnapshot } from "../server/engine.ts"
+import { SSE_HEADERS, createSseWriter, sseLines } from "../server/stream.ts"
 
 const CORS = {
   "access-control-allow-origin": "*",

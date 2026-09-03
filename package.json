@@ -8,7 +8,7 @@
     "build": "sh scripts/build.sh",
     "local": "node scripts/run-local.mjs",
     "package:scw": "sh scripts/build.sh",
-    "api:dev": "node --experimental-strip-types api/local.mjs",
+    "api:dev": "node --experimental-strip-types server/local.mjs",
     "vendor": "bun scripts/vendor-opencode.mjs",
     "test:api": "node scripts/test-api.mjs",
     "test:node": "node scripts/smoke-test.mjs && node scripts/test-bridge.mjs"

@@ -3,7 +3,7 @@
  * Vercel 路径黑盒测试（自 scripts/test-deno.mjs D1-D10 平移，spec §8）。
  *
  * 用法：node scripts/test-api.mjs [PORT]
- *   - PORT 缺省时自动拉起 `node --experimental-strip-types api/local.mjs`
+ *   - PORT 缺省时自动拉起 `node --experimental-strip-types server/local.mjs`
  *     （与线上同一 handler：api/index.ts，经 node:http ↔ Web Request 桥接）
  *   - 传入 PORT 则只跑断言（外部已起好服务）
  *
@@ -60,9 +60,9 @@ async function main() {
 
   if (!base) {
     base = "http://127.0.0.1:18432"
-    console.log(`==> 拉起 node --experimental-strip-types api/local.mjs（PORT=18432）`)
+    console.log(`==> 拉起 node --experimental-strip-types server/local.mjs（PORT=18432）`)
     const { spawn } = await import("node:child_process")
-    child = spawn(process.execPath, ["--experimental-strip-types", "api/local.mjs"], {
+    child = spawn(process.execPath, ["--experimental-strip-types", "server/local.mjs"], {
       env: { ...process.env, PORT: "18432", PROXY_API_KEY: KEY },
       stdio: ["ignore", "pipe", "pipe"],
     })

@@ -2,12 +2,12 @@
 /**
  * 本地 shim：node:http ↔ Web Request 桥接（仅本地/测试用，不参与部署）。
  * 与线上同一 handler（api/index.ts），测试结论可信。
- * 用法：node --experimental-strip-types api/local.mjs（PORT 环境变量，默认 8787）
+ * 用法：node --experimental-strip-types server/local.mjs（PORT 环境变量，默认 8787）
  */
 import { createServer } from "node:http"
 
 const PORT = Number(process.env.PORT || 8787)
-const mod = await import("./index.ts")
+const mod = await import("../api/index.ts")
 const handler = mod.handler
 
 const server = createServer(async (req, res) => {
