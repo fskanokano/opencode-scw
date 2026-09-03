@@ -12,6 +12,12 @@
  *   - 删除 startMemoryMonitor()/Deno.exit 熔断看门狗：Vercel Hobby 固定 2GB 上限，
  *     引擎实测 RSS 峰值 ~720MB 余量充足，实例回收交给平台（spec §2）
  *
+ * 为什么是 .js 而不是 .ts：Vercel（@vercel/node）把 api/index.ts 编译为 CJS 时
+ * import 说明符原样保留（不改写 .ts 扩展名），而 nft 文件追踪把 TS 依赖编译后
+ * 复制为 .js —— 运行时 require("../server/engine.ts") 找不到文件，函数加载即崩
+ * （线上曾因此全路由 FUNCTION_INVOCATION_FAILED）。本文件用纯 JS + 同目录
+ * engine.d.ts 声明，本地 strip-types 与 Vercel 编译形态双兼容。
+ *
  * import bundle 前设置 opencode 需要的环境变量（对齐 src/opencode.js ensureRuntime）。
  */
 
@@ -21,7 +27,7 @@ import { mkdirSync, writeFileSync, existsSync } from "node:fs"
 import { pathToFileURL } from "node:url"
 
 // bundle 导出的 app：Web 标准 fetch 签名（Request → Response）
-type AppLike = { fetch: (request: Request) => Response | Promise<Response> }
+// （类型声明见 engine.d.ts 的 AppLike）
 
 // bundle 定位：Vercel 函数运行时 CWD = 函数目录根，includeFiles 以项目根相对路径
 // 把 vendor/dist/** 打进去；本地跑 shim 时 CWD = 项目根，同样成立。
@@ -30,8 +36,8 @@ const bundlePath =
   process.env.OPENCODE_BUNDLE_PATH ||
   path.resolve(process.cwd(), "vendor", "dist", "opencode-server.mjs")
 
-let app: AppLike | null = null
-let ensuring: Promise<AppLike> | null = null
+let app = null
+let ensuring = null
 
 /** 环境前置（对齐 src/opencode.js ensureRuntime 的凭据/XDG 逻辑）。 */
 function prepareEnv() {
@@ -85,16 +91,16 @@ function prepareEnv() {
  * ensureEngine()：Promise 单例。首次调用动态 import bundle（effect runtime
  * 惰性构建发生在首次 app.fetch），后续调用直接命中已初始化实例。
  */
-export function ensureEngine(): Promise<AppLike> {
+export function ensureEngine() {
   if (app) return Promise.resolve(app)
   if (ensuring) return ensuring
 
-  const task = (async (): Promise<AppLike> => {
+  const task = (async () => {
     prepareEnv()
     if (!existsSync(bundlePath)) {
       throw new Error(`opencode bundle 不存在：${bundlePath}（先跑 bun scripts/vendor-opencode.mjs）`)
     }
-    const mod = (await import(pathToFileURL(bundlePath).href)) as { app?: AppLike }
+    const mod = await import(pathToFileURL(bundlePath).href)
     if (!mod.app || typeof mod.app.fetch !== "function") {
       throw new Error("opencode bundle 导出异常：app.fetch 不可用")
     }
@@ -119,13 +125,7 @@ export function ensureEngine(): Promise<AppLike> {
 const BOOT_TS = Date.now()
 
 /** 内存快照（Node process.memoryUsage()：buffers ≈ arrayBuffers）。 */
-export function memorySnapshot(): {
-  rssMB: number
-  heapUsedMB: number
-  heapTotalMB: number
-  externalMB: number
-  buffersMB: number
-} {
+export function memorySnapshot() {
   try {
     const m = process.memoryUsage()
     return {
@@ -141,16 +141,16 @@ export function memorySnapshot(): {
 }
 
 /** 实例启动时间（health 用于判断是否重启过）。 */
-export function bootUptimeSec(): number {
+export function bootUptimeSec() {
   return Math.round((Date.now() - BOOT_TS) / 1000)
 }
 
 /** 进程内 fetch：path 形如 "/session" 或 "/session?x=1"。 */
-export async function engineFetch(pathWithQuery: string, init?: RequestInit): Promise<Response> {
+export async function engineFetch(pathWithQuery, init) {
   const a = await ensureEngine()
   return a.fetch(new Request(new URL(pathWithQuery, "http://internal"), init))
 }
 
-export function engineReady(): boolean {
+export function engineReady() {
   return Boolean(app)
 }

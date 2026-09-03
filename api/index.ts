@@ -6,7 +6,7 @@
  *   - checkAuth            → src/proxy.js checkAuth 语义复刻（Bearer 单门制）
  *   - handleModels         → 进程内 /config/providers → OpenAI list（失败回退静态 ZEN_MODELS）
  *   - handleChat/stream    → 翻译层复用（extractUserPrompt/mapVariant/sessionKeyFor/stripEcho）
- *                            + api/stream.ts 真流式（对齐 src/proxy.js streamChat 状态机）
+ *                            + server/stream.js 真流式（对齐 src/proxy.js streamChat 状态机）
  *   - 其余路径              → engine.fetch(req) 原样透传（对齐 src/bridge.js forwardStream）
  *
  * 单门制（spec §5）：进程内 app.fetch 外部不可达，只有 PROXY_API_KEY 一道门；
@@ -16,12 +16,15 @@
 // CJS 纯函数模块用静态命名导入（Node CJS-ESM 互操作 + esbuild 双兼容）。
 // 不要用 createRequire(import.meta.url)：Vercel 把本文件按 CJS 格式打包时
 // import.meta 为空，模块加载即崩（线上曾因此全路由 500 FUNCTION_INVOCATION_FAILED）。
+// 依赖一律指向 .js 文件：Vercel（@vercel/node）编译本文件为 CJS 时 import 说明符
+// 原样保留（不改写 .ts 扩展名），而 nft 只复制 .js 产物 —— .ts 路径会在运行时
+// MODULE_NOT_FOUND，函数加载即崩（FUNCTION_INVOCATION_FAILED）。
 import { normalizeModel, modelsPayload } from "../src/zen-models.js"
 import { extractUserPrompt } from "../src/proxy.js"
 import { mapVariant, extractTokens } from "../src/opencode.js"
 
-import { bootUptimeSec, engineFetch, engineReady, ensureEngine, memorySnapshot } from "../server/engine.ts"
-import { SSE_HEADERS, createSseWriter, sseLines } from "../server/stream.ts"
+import { bootUptimeSec, engineFetch, engineReady, ensureEngine, memorySnapshot } from "../server/engine.js"
+import { SSE_HEADERS, createSseWriter, sseLines } from "../server/stream.js"
 
 const CORS = {
   "access-control-allow-origin": "*",

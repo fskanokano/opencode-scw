@@ -9,6 +9,10 @@
  *
  * 队列语义（对齐 SseWriter.push）：所有帧经串行队列排队，保证 stop/[DONE]
  * 永远在分片之后；打字机节奏（chunk/delay）默认开启，可经环境变量关闭。
+ *
+ * 为什么是 .js 而不是 .ts：同 server/engine.js（Vercel 编译形态下 .ts 扩展名
+ * 的 import 路径会在运行时找不到文件，导致 FUNCTION_INVOCATION_FAILED）。
+ * 本文件用纯 JS + 同目录 stream.d.ts 声明。
  */
 
 // 与 src/bridge.js CORS 常量一致的值（Deno 路径 Response 头重建用）
@@ -20,28 +24,12 @@ export const SSE_HEADERS = {
   "access-control-allow-origin": "*",
 }
 
-function sseSend(obj: unknown): string {
+function sseSend(obj) {
   return "data: " + JSON.stringify(obj) + "\n\n"
 }
 
-function sseDone(): string {
+function sseDone() {
   return "data: [DONE]\n\n"
-}
-
-export type SseWriter = {
-  stream: ReadableStream<Uint8Array>
-  /** 排入一帧（任意 OpenAI chunk 结构）。 */
-  sse: (payloadObj: unknown) => void
-  /** 正文/思考分片（首帧前自动补 role 帧；打字机节奏对齐 src/proxy.js）。 */
-  chunk: (field: "content" | "reasoning_content", text: string) => void
-  /** stream_options.include_usage 的收尾 usage 帧（choices 为空数组）。 */
-  usage: (u: unknown) => void
-  /** finish_reason:"stop" 帧。 */
-  stop: () => void
-  /** data: [DONE] 帧。 */
-  done: () => void
-  /** 等待队列排空后关闭流。 */
-  end: () => Promise<void>
 }
 
 /**
@@ -52,17 +40,14 @@ export type SseWriter = {
  * Response 返回后 Deno legacy serve 会 abort req.signal，不能用
  * req.signal 探测断连；ReadableStream.cancel 才是可靠信号）。
  */
-export function createSseWriter(
-  base: Record<string, unknown>,
-  opts: { onCancel?: () => void } = {},
-): SseWriter {
-  let controller: ReadableStreamDefaultController<Uint8Array> | null = null
+export function createSseWriter(base, opts = {}) {
+  let controller = null
   let closed = false
   let roleSent = false
   let queue = Promise.resolve()
   const encoder = new TextEncoder()
 
-  const stream = new ReadableStream<Uint8Array>({
+  const stream = new ReadableStream({
     start(c) {
       controller = c
     },
@@ -75,7 +60,7 @@ export function createSseWriter(
     },
   })
 
-  function enqueue(text: string): void {
+  function enqueue(text) {
     if (closed || !controller) return
     try {
       controller.enqueue(encoder.encode(text))
@@ -84,10 +69,10 @@ export function createSseWriter(
     }
   }
 
-  function push(fn: () => void, delayMs = 0): Promise<void> {
+  function push(fn, delayMs = 0) {
     queue = queue.then(
       () =>
-        new Promise<void>((resolve) => {
+        new Promise((resolve) => {
           setTimeout(() => {
             try {
               fn()
@@ -99,11 +84,11 @@ export function createSseWriter(
     return queue
   }
 
-  function sse(payloadObj: unknown): void {
+  function sse(payloadObj) {
     push(() => enqueue(sseSend(payloadObj)))
   }
 
-  function chunk(field: "content" | "reasoning_content", text: string): void {
+  function chunk(field, text) {
     if (!text) return
     if (!roleSent) {
       roleSent = true
@@ -123,23 +108,23 @@ export function createSseWriter(
     }
   }
 
-  function usage(u: unknown): void {
+  function usage(u) {
     sse({ ...base, choices: [], usage: u })
   }
 
-  function stop(): void {
+  function stop() {
     push(() => {
       enqueue(sseSend({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }))
     })
   }
 
-  function done(): void {
+  function done() {
     push(() => {
       enqueue(sseDone())
     })
   }
 
-  async function end(): Promise<void> {
+  async function end() {
     await queue.catch(() => {})
     try {
       if (controller) controller.close()
@@ -154,8 +139,8 @@ export function createSseWriter(
  * sseLines：纯 Web Streams SSE 解析器（等价复刻 src/proxy.js sseLines，
  * Deno 兼容）。输入 opencode /event 的 Response，逐条 yield data 载荷。
  */
-export async function* sseLines(res: Response): AsyncGenerator<string> {
-  const reader = (res.body as ReadableStream<Uint8Array>).getReader()
+export async function* sseLines(res) {
+  const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buf = ""
   while (true) {

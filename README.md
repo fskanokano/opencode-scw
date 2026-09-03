@@ -29,10 +29,10 @@ GitHub 仓库（main 分支）
 │    ├─ /v1/models       → 进程内 /config/providers → OpenAI list  │
 │    ├─ /v1/chat/*       → OpenAI 翻译层 + 真流式（SSE 逐帧）      │
 │    └─ 其余路径          → engineFetch(req) 原样透传             │
-│  server/engine.ts —— 进程内 opencode 引擎适配器                  │
+│  server/engine.js —— 进程内 opencode 引擎适配器                  │
 │    import { app } from vendor/dist/opencode-server.mjs           │
 │    （app.fetch 直调，零套接字、无端口、无内部 Basic 门）          │
-│  server/stream.ts —— SSE 写器/解析器（纯 Web Streams）           │
+│  server/stream.js —— SSE 写器/解析器（纯 Web Streams）           │
 │  server/local.mjs —— 本地 shim（node:http ↔ Web Request，仅本地/测试）│
 └───────────────────────────────────────────────────────────────────┘
 ```
@@ -159,8 +159,8 @@ server**（常驻子进程），拿到类型安全 client；之后所有请求�
 
 ```
 api/index.ts            # Vercel 入口（fetch export 壳 + handler 核心）
-server/engine.ts        # 进程内 opencode 引擎适配器（app.fetch 直调）
-server/stream.ts        # SSE 写器/解析器（纯 Web Streams）
+server/engine.js        # 进程内 opencode 引擎适配器（app.fetch 直调）
+server/stream.js        # SSE 写器/解析器（纯 Web Streams）
 server/local.mjs        # 本地 shim（node:http ↔ Web Request，仅本地/测试）
 vercel.json             # Vercel 函数配置（300s 时长 + vendor bundle 打包）
 vendor/src/entry.ts     # bundle 入口（re-export 上游进程内 app）
