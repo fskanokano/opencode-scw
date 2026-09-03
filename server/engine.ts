@@ -23,7 +23,12 @@ import { pathToFileURL } from "node:url"
 // bundle 导出的 app：Web 标准 fetch 签名（Request → Response）
 type AppLike = { fetch: (request: Request) => Response | Promise<Response> }
 
-const bundlePath = path.resolve(import.meta.dirname ?? ".", "..", "vendor", "dist", "opencode-server.mjs")
+// bundle 定位：Vercel 函数运行时 CWD = 函数目录根，includeFiles 以项目根相对路径
+// 把 vendor/dist/** 打进去；本地跑 shim 时 CWD = 项目根，同样成立。
+// 不要用 import.meta.dirname：CJS 格式打包时 import.meta 为空（esbuild 无法解析 dirname）。
+const bundlePath =
+  process.env.OPENCODE_BUNDLE_PATH ||
+  path.resolve(process.cwd(), "vendor", "dist", "opencode-server.mjs")
 
 let app: AppLike | null = null
 let ensuring: Promise<AppLike> | null = null

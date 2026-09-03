@@ -13,19 +13,12 @@
  * Node 形态的内部 Basic 双门在 Vercel 路径不存在。
  */
 
-import { createRequire } from "node:module"
-const require = createRequire(import.meta.url)
-const { normalizeModel, modelsPayload } = require("../src/zen-models.js") as {
-  normalizeModel: (m: string | undefined) => string
-  modelsPayload: () => unknown
-}
-const { extractUserPrompt } = require("../src/proxy.js") as {
-  extractUserPrompt: (messages: unknown[]) => { prompt: string; system: string; fileParts: unknown[] }
-}
-const { mapVariant, extractTokens } = require("../src/opencode.js") as {
-  mapVariant: (body: Record<string, unknown>) => string | undefined
-  extractTokens: (info: unknown) => Record<string, number>
-}
+// CJS 纯函数模块用静态命名导入（Node CJS-ESM 互操作 + esbuild 双兼容）。
+// 不要用 createRequire(import.meta.url)：Vercel 把本文件按 CJS 格式打包时
+// import.meta 为空，模块加载即崩（线上曾因此全路由 500 FUNCTION_INVOCATION_FAILED）。
+import { normalizeModel, modelsPayload } from "../src/zen-models.js"
+import { extractUserPrompt } from "../src/proxy.js"
+import { mapVariant, extractTokens } from "../src/opencode.js"
 
 import { bootUptimeSec, engineFetch, engineReady, ensureEngine, memorySnapshot } from "../server/engine.ts"
 import { SSE_HEADERS, createSseWriter, sseLines } from "../server/stream.ts"
