@@ -204,8 +204,13 @@ async function subscribeEvents(serverUrl, sessionID, handlers) {
           if (props.sessionID && sessionID && props.sessionID !== sessionID) continue;
           if (ev.type === "message.part.updated" && props.part && handlers.onPart) {
             handlers.onPart(props.part);
-          } else if (ev.type === "permission.asked" && props.id && handlers.onPermission) {
-            handlers.onPermission(props.id);
+          } else if (
+            (ev.type === "permission.asked" || ev.type === "permission.v2.asked") &&
+            props.id &&
+            handlers.onPermission
+          ) {
+            // v2 = true 走新协议 reply 路由（/api/session/:sid/permission/:id/reply）
+            handlers.onPermission(props.id, ev.type === "permission.v2.asked");
           }
         }
       }
@@ -250,19 +255,18 @@ async function bridgePrompt(opts) {
     onPart: (part) => {
       if (opts.onPart) opts.onPart(part);
     },
-    onPermission: (id) => {
+    onPermission: (id, v2) => {
       if (!autoApproveEnabled()) return;
-      postJson(`${serverUrl}/session/${encodeURIComponent(sessionId)}/permissions/${id}`, {
-        // bundle schema：payload = { response: "once"|"always"|"reject" }。
-        // （之前误发 { response: "allow", remember: true }：字段名对但枚举值
-        //  非法（allow 不在 once/always/reject 中），schema 校验失败 → 400 →
-        //  agent 永远等权限 → message POST 永不返回 → 客户端零帧卡死；
-        //  "once" = 本次放行，"always" = 记住放行）
-        response: "once",
-      })
+      // v1: /session/:sid/permissions/:id { response: "once" }（旧协议）
+      // v2: /api/session/:sid/permission/:id/reply { reply: "once" }（新协议，/doc 实测）
+      // 枚举 once|always|reject 两套一致；"allow" 非法 → 400 → agent 永远等权限 → 客户端零帧卡死
+      const url = v2
+        ? `${serverUrl}/api/session/${encodeURIComponent(sessionId)}/permission/${encodeURIComponent(id)}/reply`
+        : `${serverUrl}/session/${encodeURIComponent(sessionId)}/permissions/${encodeURIComponent(id)}`;
+      postJson(url, v2 ? { reply: "once" } : { response: "once" })
         .then(({ status }) => {
           // 放行失败会让 agent 一直等权限 → 客户端零帧卡死；不能静默吞掉
-          if (status >= 300) console.error(`[opencode] 权限自动放行失败: HTTP ${status}`);
+          if (status >= 300) console.error(`[opencode] 权限自动放行失败: HTTP ${status} (${v2 ? "v2" : "v1"} ${id})`);
         })
         .catch((e) => console.error(`[opencode] 权限自动放行失败: ${String((e && e.message) || e)}`));
     },

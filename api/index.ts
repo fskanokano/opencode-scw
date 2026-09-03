@@ -151,6 +151,71 @@ function engineErrorMessage(info: unknown): string | null {
   return (m && String(m).trim()) || null
 }
 
+// ---- 权限自动放行（V1 旧协议 + V2 新协议双通道，均经 /doc 实测确认 schema）----
+// v1: permission.asked        → POST /session/:sid/permissions/:id      { response: "once" }
+// v2: permission.v2.asked     → POST /api/session/:sid/permission/:id/reply { reply: "once" }
+// 枚举 once|always|reject 两套一致；"allow" 非法 → 400 → agent 永远等权限 → 客户端零帧卡死。
+function approvePermission(sessionID: string, requestID: string, v2: boolean): void {
+  const path = v2
+    ? `/api/session/${encodeURIComponent(sessionID)}/permission/${encodeURIComponent(requestID)}/reply`
+    : `/session/${encodeURIComponent(sessionID)}/permissions/${encodeURIComponent(requestID)}`
+  const body = v2 ? JSON.stringify({ reply: "once" }) : JSON.stringify({ response: "once" })
+  engineFetch(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body,
+  })
+    .then((r) => {
+      // 放行失败会让 agent 一直等权限 → 客户端零帧卡死；不能静默吞掉
+      if (!r.ok) console.error(`[api] 权限自动放行失败: HTTP ${r.status} (${v2 ? "v2" : "v1"} ${requestID})`)
+    })
+    .catch((e) => console.error(`[api] 权限自动放行失败: ${String((e as Error).message || e)}`))
+}
+
+/**
+ * 会话级权限看门狗：订阅 /event，只处理本会话的权限询问并自动放行。
+ * 返回 stop()；用于非流式路径（流式路径把同一逻辑内联在 startEventLoop）。
+ */
+function startPermissionWatcher(sid: string): () => void {
+  let evtRes: Response | null = null
+  let cancelled = false
+  void (async () => {
+    try {
+      const res = await engineFetch("/event")
+      if (!res.ok || !res.body) return
+      evtRes = res
+      for await (const data of sseLines(res)) {
+        if (cancelled) break
+        let ev: Json | null = null
+        try {
+          ev = JSON.parse(data)
+        } catch {
+          continue
+        }
+        if (!ev || typeof ev !== "object") continue
+        const props = ev.properties as Json | undefined
+        if (!props || typeof props !== "object") continue
+        if (props.sessionID && props.sessionID !== sid) continue
+        if (
+          (ev.type === "permission.asked" || ev.type === "permission.v2.asked") &&
+          props.id &&
+          process.env.OPENCODE_AUTO_APPROVE !== "false"
+        ) {
+          approvePermission(sid, String(props.id), ev.type === "permission.v2.asked")
+        }
+      }
+    } catch {
+      /* 事件总线不可用：不阻塞消息本身 */
+    }
+  })()
+  return () => {
+    cancelled = true
+    const r = evtRes
+    evtRes = null
+    if (r && r.body) r.body.cancel().catch(() => {})
+  }
+}
+
 function completionId(): string {
   const bytes = new Uint8Array(8)
   crypto.getRandomValues(bytes)
@@ -272,26 +337,13 @@ async function handleChat(req: Request, reqBody: ChatBody): Promise<Response> {
             }
             s.acc += props.delta
             flushState(s)
-          } else if (ev.type === "permission.asked" && props.id && process.env.OPENCODE_AUTO_APPROVE !== "false") {
+          } else if (
+            (ev.type === "permission.asked" || ev.type === "permission.v2.asked") &&
+            props.id &&
+            process.env.OPENCODE_AUTO_APPROVE !== "false"
+          ) {
             // 自动放行 agent 工具权限（调用方已通过 PROXY_API_KEY 鉴权）
-            engineFetch(
-              `/session/${encodeURIComponent(String(sessionID))}/permissions/${props.id}`,
-              {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                // bundle schema：payload = { response: "once"|"always"|"reject" }。
-                // （之前误发 { response: "allow", remember: true }：字段名对但枚举值
-                //  非法（allow 不在 once/always/reject 中），schema 校验失败 → 400 →
-                //  agent 永远等权限 → message POST 永不返回 → 客户端零帧卡死；
-                //  "once" = 本次放行，"always" = 记住放行）
-                body: JSON.stringify({ response: "once" }),
-              },
-            )
-              .then((r) => {
-                // 放行失败会让 agent 一直等权限 → 客户端零帧卡死；不能静默吞掉
-                if (!r.ok) console.error(`[api] 权限自动放行失败: HTTP ${r.status}`)
-              })
-              .catch((e) => console.error(`[api] 权限自动放行失败: ${String((e as Error).message || e)}`))
+            approvePermission(String(sessionID), String(props.id), ev.type === "permission.v2.asked")
           }
         }
       })().catch((e) => {
@@ -425,12 +477,19 @@ async function handleChatNonStream(reqBody: ChatBody, req: Request): Promise<Res
       ...(system ? { system } : {}),
       ...(variant ? { variant } : {}),
     }
-    return engineFetch(`/session/${encodeURIComponent(sid)}/message`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: req.signal,
-    })
+    // 非流式没有流式状态机的事件订阅，agent 要工具时若无人放行权限会永久等待：
+    // 挂一个会话级看门狗自动放行，message 返回后即停
+    const stopWatcher = startPermissionWatcher(sid)
+    try {
+      return await engineFetch(`/session/${encodeURIComponent(sid)}/message`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: req.signal,
+      })
+    } finally {
+      stopWatcher()
+    }
   }
 
   let res: Response

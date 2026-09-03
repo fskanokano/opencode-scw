@@ -135,6 +135,28 @@ function extractUserPrompt(messages) {
 module.exports.extractUserPrompt = extractUserPrompt;
 module.exports.mimeForUrl = mimeForUrl;
 
+// 权限自动放行（V1 旧协议 + V2 新协议双通道，均经 /doc 实测确认 schema）。
+// v1: permission.asked    → /session/:sid/permissions/:id   { response: "once" }
+// v2: permission.v2.asked → /api/session/:sid/permission/:id/reply { reply: "once" }
+// 枚举 once|always|reject 两套一致；"allow" 非法 → 400 → agent 永远等权限 →
+// message POST 永不返回 → 客户端零帧卡死（曾线上事故，勿改回）。
+function autoApprovePermission(serverUrl, sessionID, requestID, v2) {
+  const url = v2
+    ? `${serverUrl}/api/session/${encodeURIComponent(sessionID)}/permission/${encodeURIComponent(requestID)}/reply`
+    : `${serverUrl}/session/${encodeURIComponent(sessionID)}/permissions/${encodeURIComponent(requestID)}`;
+  const body = v2 ? JSON.stringify({ reply: "once" }) : JSON.stringify({ response: "once" });
+  return serverFetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body,
+  })
+    .then((r) => {
+      // 放行失败会让 agent 一直等权限 → 客户端零帧卡死；不能静默吞掉
+      if (!r.ok) console.error(`[proxy] 权限自动放行失败: HTTP ${r.status} (${v2 ? "v2" : "v1"} ${requestID})`);
+    })
+    .catch((e) => console.error(`[proxy] 权限自动放行失败: ${String((e && e.message) || e)}`));
+}
+
 function completionId(prefix) {
   return (prefix || "chatcmpl") + "-" + crypto.randomBytes(8).toString("hex");
 }
@@ -709,23 +731,13 @@ module.exports.streamChat = async function streamChat(res, event, sessions) {
             // 真正的增量流（opencode 以 ~1500ch/s 频率推 message.part.delta）：
             // 只转发新增字节，文本从此不再"整块到货"
             await pushDelta(props.partID, props.messageID, props.delta);
-          } else if (ev.type === "permission.asked" && props.id && autoApproveStream()) {
+          } else if (
+            (ev.type === "permission.asked" || ev.type === "permission.v2.asked") &&
+            props.id &&
+            autoApproveStream()
+          ) {
             // 自动放行 agent 的工具权限（调用方已通过 PROXY_API_KEY 鉴权）
-            serverFetch(`${serverUrl}/session/${encodeURIComponent(sessionID)}/permissions/${props.id}`, {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              // bundle schema：payload = { response: "once"|"always"|"reject" }。
-              // （之前误发 { response: "allow", remember: true }：字段名对但枚举值
-              //  非法（allow 不在 once/always/reject 中），schema 校验失败 → 400 →
-              //  agent 永远等权限 → message POST 永不返回 → 客户端零帧卡死；
-              //  "once" = 本次放行，"always" = 记住放行）
-              body: JSON.stringify({ response: "once" }),
-            })
-              .then((r) => {
-                // 放行失败会让 agent 一直等权限 → 客户端零帧卡死；不能静默吞掉
-                if (!r.ok) console.error(`[proxy] 权限自动放行失败: HTTP ${r.status}`);
-              })
-              .catch((e) => console.error(`[proxy] 权限自动放行失败: ${String((e && e.message) || e)}`));
+            autoApprovePermission(serverUrl, sessionID, props.id, ev.type === "permission.v2.asked");
           }
         }
       })().catch((e) => {
