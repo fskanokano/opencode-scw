@@ -253,9 +253,18 @@ async function bridgePrompt(opts) {
     onPermission: (id) => {
       if (!autoApproveEnabled()) return;
       postJson(`${serverUrl}/session/${encodeURIComponent(sessionId)}/permissions/${id}`, {
-        response: "allow",
-        remember: true,
-      }).catch(() => {});
+        // bundle schema：payload = { response: "once"|"always"|"reject" }。
+        // （之前误发 { response: "allow", remember: true }：字段名对但枚举值
+        //  非法（allow 不在 once/always/reject 中），schema 校验失败 → 400 →
+        //  agent 永远等权限 → message POST 永不返回 → 客户端零帧卡死；
+        //  "once" = 本次放行，"always" = 记住放行）
+        response: "once",
+      })
+        .then(({ status }) => {
+          // 放行失败会让 agent 一直等权限 → 客户端零帧卡死；不能静默吞掉
+          if (status >= 300) console.error(`[opencode] 权限自动放行失败: HTTP ${status}`);
+        })
+        .catch((e) => console.error(`[opencode] 权限自动放行失败: ${String((e && e.message) || e)}`));
     },
   });
 

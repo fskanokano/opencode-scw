@@ -714,8 +714,18 @@ module.exports.streamChat = async function streamChat(res, event, sessions) {
             serverFetch(`${serverUrl}/session/${encodeURIComponent(sessionID)}/permissions/${props.id}`, {
               method: "POST",
               headers: { "content-type": "application/json" },
-              body: JSON.stringify({ response: "allow", remember: true }),
-            }).catch(() => {});
+              // bundle schema：payload = { response: "once"|"always"|"reject" }。
+              // （之前误发 { response: "allow", remember: true }：字段名对但枚举值
+              //  非法（allow 不在 once/always/reject 中），schema 校验失败 → 400 →
+              //  agent 永远等权限 → message POST 永不返回 → 客户端零帧卡死；
+              //  "once" = 本次放行，"always" = 记住放行）
+              body: JSON.stringify({ response: "once" }),
+            })
+              .then((r) => {
+                // 放行失败会让 agent 一直等权限 → 客户端零帧卡死；不能静默吞掉
+                if (!r.ok) console.error(`[proxy] 权限自动放行失败: HTTP ${r.status}`);
+              })
+              .catch((e) => console.error(`[proxy] 权限自动放行失败: ${String((e && e.message) || e)}`));
           }
         }
       })().catch((e) => {
