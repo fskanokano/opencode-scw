@@ -1,4 +1,4 @@
-# opencode-scw —— 跑"原汁原味"的 opencode（Deno 进程内 / Scaleway Function 双形态）
+# opencode-scw —— 跑"原汁原味"的 opencode（Vercel 进程内 / Node 常驻双形态）
 
 把一个真实的 [OpenCode](https://github.com/anomalyco/opencode) 嵌进服务进程，外面套一个
 OpenAI 兼容接口。你把任意 OpenAI 客户端的 `baseURL` 指到服务地址，就能当一个"原生 OpenAI
@@ -8,61 +8,66 @@ OpenAI 兼容接口。你把任意 OpenAI 客户端的 `baseURL` 指到服务地
 
 | 形态 | 入口 | 状态 |
 | --- | --- | --- |
-| **Deno 进程内**（推荐） | `deno task dev`（`deno/main.ts`） | opencode 以预编译 bundle 直接嵌入 Deno 进程，零子进程、单门制、端到端真流式。部署目标 [Deno Deploy](https://deno.com/deploy)：连接 GitHub 仓库 + dev 分支，**推送即部署** |
-| **Scaleway Function** | `handler.js`（`exports.handle`） | 旧形态，保留；常驻形态 `node handler.js` 仍支持全透传 |
+| **Vercel 进程内**（推荐） | `api/index.ts`（`vercel.json` 已配好） | opencode 以预编译 bundle 直接嵌入 Node 24 函数进程，零子进程、单门制、端到端真流式。部署目标 [Vercel](https://vercel.com)：GitHub 集成连接仓库，**推送 main 即部署**。Hobby 套餐 2GB 内存 / 300s 时长 |
+| **Node 常驻** | `handler.js`（`node handler.js`） | 容器 / VPS / Freebuff 托管跑常驻服务；全透传（含 web UI / SSE / WebSocket 终端）能力最完整 |
 
 ---
 
-## Deno 进程内形态（方案 A，主力）
+## Vercel 进程内形态（方案 A，主力）
 
 ### 架构
 
 ```
-GitHub 仓库（dev 分支）
-   │ git push → Deno Deploy GitHub 集成自动构建部署
+GitHub 仓库（main 分支）
+   │ git push → Vercel GitHub 集成自动构建部署
    ▼
-┌─ Deno Deploy 实例（标准 Deno 2.5+，--allow-all）────────────────┐
-│  deno/main.ts —— 唯一新入口                                      │
+┌─ Vercel Function（Node.js 24.x runtime，fluid compute，2GB 内存）─┐
+│  api/index.ts —— 唯一新入口                                      │
 │    ├─ OPTIONS          → 204 + CORS                             │
 │    ├─ checkAuth        → Bearer PROXY_API_KEY（单门制，fail closed）│
-│    ├─ /v1/health       → 200（含引擎就绪状态）                   │
+│    ├─ /v1/health       → 200（含引擎就绪状态 + 内存快照）        │
 │    ├─ /v1/models       → 进程内 /config/providers → OpenAI list  │
 │    ├─ /v1/chat/*       → OpenAI 翻译层 + 真流式（SSE 逐帧）      │
-│    └─ 其余路径          → engine.fetch(req) 原样透传             │
-│  deno/engine.ts —— 进程内 opencode 引擎适配器                     │
+│    └─ 其余路径          → engineFetch(req) 原样透传             │
+│  api/engine.ts —— 进程内 opencode 引擎适配器                     │
 │    import { app } from vendor/dist/opencode-server.mjs           │
 │    （app.fetch 直调，零套接字、无端口、无内部 Basic 门）          │
-│  deno/stream.ts —— Web Streams 版 SSE 写器/解析器                │
+│  api/stream.ts —— SSE 写器/解析器（纯 Web Streams）              │
+│  api/local.mjs —— 本地 shim（node:http ↔ Web Request，仅本地/测试）│
 └───────────────────────────────────────────────────────────────────┘
 ```
 
-与 Scaleway 形态的本质区别：**opencode 不再是子进程**。上游源码经
-`scripts/vendor-opencode.mjs` 流水线（下载锁定版本 tarball → SHA256 校验 →
-Bun.build conditions=node → 双运行时冒烟）预编译成 `vendor/dist/opencode-server.mjs`
-（提交进仓库），Deno 入口动态 import 后直接 `app.fetch()` 进程内调用——单进程单运行时，
-省掉第二份运行时与子进程管理开销；上游源文件逻辑改动为零。
+**opencode 不再是子进程**。上游源码经 `scripts/vendor-opencode.mjs` 流水线（下载锁定版本
+tarball → SHA256 校验 → Bun.build conditions=node → 冒烟）预编译成
+`vendor/dist/opencode-server.mjs`（提交进仓库），入口动态 import 后直接 `app.fetch()`
+进程内调用——单进程单运行时。Vercel Hobby 固定 2GB 内存直接消掉旧 Deno Deploy
+768MiB 的 OOM 烦恼（引擎实测 RSS 峰值 ~720MB，余量充足）。
 
-### 环境变量（Deno 形态）
+> 与 Deno Deploy 的差异（如实声明）：执行时长硬上限 300s（超时平台回 504，客户端重发
+> 历史即可续聊，会话锚定支持）；函数内不支持 WebSocket 升级，`/pty` 终端透传在
+> Vercel 路径不可用（web UI 其余透传不受影响）；请求体上限 4.5MB。
+
+### 环境变量（Vercel 形态）
 
 | 变量 | 必填 | 说明 |
 | --- | --- | --- |
 | `PROXY_API_KEY` | ✅ | 代理访问密钥，所有请求必须带 `Authorization: Bearer <PROXY_API_KEY>`；未配置时 fail closed |
 | `OPENCODE_API_KEY`（或 `OPENCODE_ZEN_API_KEY`） | ✅（真对话） | opencode Zen API Key，写进引擎的 `auth.json`；不配也能起服务，但 LLM 调用会失败 |
 | `OPENCODE_DEFAULT_MODEL` | ｜ | 默认模型（请求不带 `model` 时用） |
-| `OPENCODE_DATA_HOME` | ｜ | 引擎数据目录（默认 `$TMPDIR/opencode-deno-data`） |
+| `OPENCODE_DATA_HOME` | ｜ | 引擎数据目录（默认 `$TMPDIR/opencode-scw-data`） |
 | `OPENCODE_AUTO_APPROVE` | ｜ | `false` 关闭 agent 工具权限自动放行 |
 | `OPENCODE_STREAM_SMOOTHING` / `OPENCODE_STREAM_CHUNK` / `OPENCODE_STREAM_DELAY_MS` | ｜ | 打字机节奏（默认开，8 字符 / 45ms；`SMOOTHING=false` 直出） |
-| `PORT` | ｜ | 监听端口（Deno Deploy 自动注入；本地默认 8787） |
+| `PORT` | ｜ | 仅本地 shim 用（默认 8787）；线上由 Vercel 管理，无需配置 |
 
 ### 本地跑
 
 ```bash
 bun install                        # src/*.js 纯函数复用需要 node_modules
-PROXY_API_KEY=test deno task dev   # 或 deno run --allow-all deno/main.ts
+PROXY_API_KEY=test bun run api:dev # = node --experimental-strip-types api/local.mjs
 
 # 另一个终端
-OPENCODE_API_KEY=<Zen key> deno task test        # 黑盒 D1–D10（自起服务）
-OPENCODE_API_KEY=<Zen key> deno task test:multiturn  # 多轮续聊 + 断连中止（自起服务）
+OPENCODE_API_KEY=<Zen key> bun run test:api      # 黑盒 D1–D10（自起服务）
+OPENCODE_API_KEY=<Zen key> bun run test:node     # Node 常驻形态回归（smoke + bridge）
 
 curl -s http://127.0.0.1:8787/v1/models -H "Authorization: Bearer test"
 curl -sN http://127.0.0.1:8787/v1/chat/completions \
@@ -70,42 +75,36 @@ curl -sN http://127.0.0.1:8787/v1/chat/completions \
   -d '{"model":"opencode/big-pickle","stream":true,"messages":[{"role":"user","content":"数到三"}]}'
 ```
 
-### 部署到 Deno Deploy（连接 GitHub，推送即部署）
+### 部署到 Vercel（GitHub 集成，你只需要做两步）
 
-1. 打开 [dash.deno.com](https://dash.deno.com) → **New Playground** 旁选 **Deploy from GitHub**（或现有项目 → Settings → Git Integration）；
-2. 授权 GitHub 后选择本仓库、分支 **`dev`**；
-3. 入口点填 **`deno/main.ts`**，其他留空即可（Deno Deploy 自动 `deno main.ts` 语义）；
-4.   在项目 **Settings → Environment Variables** 添加 `PROXY_API_KEY` 与 `OPENCODE_API_KEY`（必填两个）；
+1. **连接仓库**：打开 [dash.vercel.com](https://dash.vercel.com) → **Add New… → Project**
+   → 导入本 GitHub 仓库。Framework Preset 选 **Other**（不要选 Vite/React 预设），
+   直接点 **Deploy**（`vercel.json` 已配好函数入口 / 300s 时长 / bundle 打包，无需再填）。
+2. **配环境变量**：项目 → **Settings → Environment Variables** 添加
+   `PROXY_API_KEY` 与 `OPENCODE_API_KEY`（必填两个，Production/Preview 都勾上），
+   然后 **Deployments → 最新一条 → Redeploy** 生效。
 
-5. **Install command 填 `npm install --omit=dev`**（不是 `npm install`）。
-   `opencode-ai` 是 devDependency，其 postinstall 会在安装时往临时目录拉 184MB 的
-   平台二进制（`opencode-linux-x64`）再拷贝，Deno Deploy 的构建沙箱里这一步会
-   exit 1 导致**构建失败**。而 Deno 进程内路径跑在预编译的 `vendor/dist/…mjs` 上，
-   无需该二进制；`--omit=dev` 跳过 devDeps，只留运行时需要的 `@opencode-ai/sdk`
-   （纯 JS，无 postinstall）。
-6. **Build command 留空**；Deno Deploy 会以 `deno/main.ts` 作为入口直接构建。
-
-保存后首次部署启动；之后 **每次 `git push` 到 dev 自动重新部署**，无需手动操作。
+其余全自动：之后 **每次 `git push` 到 `main` 自动重新部署**，无需手动操作。
 
 线上验收：
 
 ```bash
-curl -s https://<your-project>.deno.dev/v1/health -H "Authorization: Bearer <PROXY_API_KEY>"
-# → {"status":"ok","engine":"ready"}
+curl -s https://<your-project>.vercel.app/v1/health -H "Authorization: Bearer <PROXY_API_KEY>"
+# → {"status":"ok","engine":"ready",...}
 ```
 
 ### 内存与状态语义（如实声明）
 
-- 单进程单运行时。opencode 引擎自身 RSS（数百 MB 级）是内存大头，进程内方案省掉的是
-  第二份运行时 + 子进程管理开销，不是 opencode 本身的占用。
-- Deno Deploy 实例空闲休眠（5s~10min）后，内存态 `sessions` Map 与引擎 SQLite 随实例消亡；
-  会话锚定靠客户端重发完整历史即可续聊（多轮语义与 Scaleway 形态一致）。
+- 单函数实例内 opencode 引擎 RSS（数百 MB 级）是内存大头，Vercel Hobby 2GB 相比旧
+  Deno Deploy 768MiB 的余量就是这次迁移的核心收益。
+- fluid compute 实例在请求间保活（分钟级）；实例被平台回收后，内存态 `sessions` Map
+  与引擎 SQLite 随之消亡。会话锚定靠客户端重发完整历史即可续聊（语义与旧形态一致）。
 - 多实例完全隔离，无跨实例共享状态；单实例即可满足当前流量。
 
 ### 升级 opencode 上游
 
 ```bash
-OPENCODE_VERSION=v1.19.x bun run vendor   # 重跑流水线：下载→校验→构建→双运行时冒烟
+OPENCODE_VERSION=v1.19.x bun run vendor   # 重跑流水线：下载→校验→构建→冒烟
 # MANIFEST 与产物有变更则一并提交；补丁预算 ≤5 个解析级微补丁（当前 0）
 ```
 
@@ -159,16 +158,16 @@ server**（常驻子进程），拿到类型安全 client；之后所有请求�
 ## 项目结构
 
 ```
-deno/main.ts            # Deno 进程内形态入口（推荐）
-deno/engine.ts          # 进程内 opencode 引擎适配器（app.fetch 直调）
-deno/stream.ts          # Web Streams 版 SSE 写器/解析器
-deno.json               # deno task dev / test / test:multiturn
+api/index.ts            # Vercel 进程内形态入口（handler 核心 + fetch 壳）
+api/engine.ts           # 进程内 opencode 引擎适配器（app.fetch 直调）
+api/stream.ts           # SSE 写器/解析器（纯 Web Streams）
+api/local.mjs           # 本地 shim（node:http ↔ Web Request，仅本地/测试）
+vercel.json             # Vercel 函数配置（300s 时长 + vendor bundle 打包）
 vendor/src/entry.ts     # bundle 入口（re-export 上游进程内 app）
 vendor/dist/opencode-server.mjs  # 预编译 opencode bundle（提交进仓库）
 vendor/MANIFEST.json    # 上游版本 / SHA256 / 补丁清单 / 构建记录
 scripts/vendor-opencode.mjs  # vendor 流水线（下载→校验→构建→冒烟）
-scripts/test-deno.mjs   # Deno 形态黑盒测试 D1–D10（自起服务）
-scripts/test-multiturn.mjs   # 多轮续聊 + 断连中止验收（自起服务）
+scripts/test-api.mjs    # Vercel 形态黑盒测试 D1–D10（自起服务）
 handler.js              # Scaleway 入口（导出 handle）；node dist/handler.js 也能本地跑
 src/opencode.js         # 通过 @opencode-ai/sdk 启动并复用共享 opencode server
 src/proxy.js            # OpenAI 兼容适配层：/v1/models、/v1/chat/completions
