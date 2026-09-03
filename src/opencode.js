@@ -297,10 +297,14 @@ async function bridgePrompt(opts) {
     const parts = json.parts || [];
     const text = extractTextParts(parts);
     const reasoning = extractReasoningParts(parts);
+    // 引擎把 provider 级失败放在 message.info.error（如 401 No payment method）；
+    // 整轮无正文时透出真实原因，不再静默变成“没有返回任何文本”
+    const engineError =
+      (info && info.error && (info.error.message || (info.error.data && info.error.data.message))) || null;
     return {
       ok: Boolean(text),
       sessionID: sessionId,
-      statusMessage: text ? "ok" : "opencode 没有返回任何文本",
+      statusMessage: text ? "ok" : engineError || "opencode 没有返回任何文本",
       code: 0,
       text,
       reasoning,

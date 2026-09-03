@@ -141,6 +141,16 @@ type ChatBody = {
   messages?: unknown[]
 }
 
+// 引擎把 provider 级失败放在 message.info.error（形如 { name: "APIError", data: { message } }），
+// 也有直接 { message } 的形态；统一提取人类可读消息。
+function engineErrorMessage(info: unknown): string | null {
+  if (!info || typeof info !== "object") return null
+  const e = (info as { error?: { message?: string; data?: { message?: string } } }).error
+  if (!e) return null
+  const m = e.message || (e.data && e.data.message)
+  return (m && String(m).trim()) || null
+}
+
 function completionId(): string {
   const bytes = new Uint8Array(8)
   crypto.getRandomValues(bytes)
@@ -340,12 +350,24 @@ async function handleChat(req: Request, reqBody: ChatBody): Promise<Response> {
         parts?: Array<{ id?: string; type?: string; text?: unknown }>
       } | null
 
+      const parts = (json && json.parts) || []
+
       // 事件可能遗漏（订阅晚于生成），用最终 parts 按 part.id 补齐（状态机天然去重）
-      for (const p of (json && json.parts) || []) {
+      for (const p of parts) {
         if (!p || typeof p.text !== "string") continue
         if ((p.type === "text" || p.type === "reasoning") && p.id) {
           pushUpdate(p.id, p.type, p.text)
         }
+      }
+
+      // 引擎把 provider 级失败放在 message.info.error（如 401 No payment method）；
+      // 若整轮没产出任何正文，把它透出给客户端，而不是静默返回空回复
+      const engineErr = engineErrorMessage(json && json.info)
+      const hasText = parts.some(
+        (p) => p && p.type === "text" && typeof p.text === "string" && p.text.length > 0,
+      )
+      if (engineErr && !hasText) {
+        sse.chunk("content", `\n[error] ${engineErr}`)
       }
 
       // stream_options.include_usage：结尾附真实 token 用量（OpenAI 标准）
@@ -434,6 +456,15 @@ async function handleChatNonStream(reqBody: ChatBody, req: Request): Promise<Res
     parts?: Array<{ type?: string; text?: unknown }>
   }
   const parts = json.parts || []
+  // 引擎把 provider 级失败放在 message.info.error（如 401 No payment method）；
+  // 整轮没有正文时透出真实错误（原来会静默返回空 content 200，客户端无法区分）
+  const engineErr = engineErrorMessage(json.info)
+  const producedText = parts.some(
+    (p) => p && p.type === "text" && typeof p.text === "string" && p.text.length > 0,
+  )
+  if (engineErr && !producedText) {
+    return jsonError(502, engineErr, "upstream_error")
+  }
   const text = parts
     .filter((p) => p && p.type === "text" && typeof p.text === "string")
     .map((p) => p.text as string)

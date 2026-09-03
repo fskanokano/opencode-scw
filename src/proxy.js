@@ -786,6 +786,14 @@ module.exports.streamChat = async function streamChat(res, event, sessions) {
     const json = await msgRes.json().catch(() => null);
     const parts = (json && json.parts) || [];
 
+    // 引擎把 provider 级失败放在 message.info.error（如 401 No payment method）；
+    // 若整轮没产出任何正文，把它透出给客户端，而不是静默返回空回复
+    const infoErr = (json && json.info && json.info.error) || undefined;
+    const errMsg = infoErr && (infoErr.message || (infoErr.data && infoErr.data.message));
+    const hasText = (parts || []).some(
+      (p) => p && p.type === "text" && typeof p.text === "string" && p.text.length > 0
+    );
+
     // 事件可能有遗漏（如订阅晚于生成），用最终 parts 按 part.id 分别补齐，
     // 避免多 part 场景下重复/残缺（pushUpdate 与增量路径共用状态，天然去重）
     for (const p of parts) {
@@ -793,6 +801,10 @@ module.exports.streamChat = async function streamChat(res, event, sessions) {
       if (p.type === "text" || p.type === "reasoning") {
         pushUpdate(p.id, p.type, p.text);
       }
+    }
+
+    if (errMsg && !hasText) {
+      sse.chunk("content", `\n[error] ${errMsg}`);
     }
 
     // stream_options.include_usage：结尾附上真实 token 用量（OpenAI 标准）
