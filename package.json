@@ -8,14 +8,13 @@
     "build": "sh scripts/build.sh",
     "local": "node scripts/run-local.mjs",
     "package:scw": "sh scripts/build.sh",
-    "deno": "deno run --allow-all deno/main.ts",
+    "api:dev": "node --experimental-strip-types api/local.mjs",
     "vendor": "bun scripts/vendor-opencode.mjs",
-    "test:deno": "node scripts/test-deno.mjs",
-    "test:multiturn": "node scripts/test-multiturn.mjs",
+    "test:api": "node scripts/test-api.mjs",
     "test:node": "node scripts/smoke-test.mjs && node scripts/test-bridge.mjs"
   },
   "engines": {
-    "node": ">=18"
+    "node": "24.x"
   },
   "dependencies": {
     "@opencode-ai/sdk": "^1.18.25",
