@@ -7,10 +7,6 @@ name: Build function.zip
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
-
 concurrency:
   group: function-zip
   cancel-in-progress: true
